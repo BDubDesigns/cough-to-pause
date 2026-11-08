@@ -141,6 +141,8 @@ private fun HarnessApp() {
             onNarrateAgain = { adventureController.act("look") },
             onNewAdventure = { adventureController.startFresh() },
             onDeleteSaves = { adventureController.deleteAllCampaigns() },
+            onSaveAi = { baseUrl, model, key -> adventureController.saveAiConfig(baseUrl, model, key) },
+            onTestAi = { adventureController.testAi() },
             onBack = {
                 NarrationService.enterHarness(context)
                 screen = Screens.MAIN

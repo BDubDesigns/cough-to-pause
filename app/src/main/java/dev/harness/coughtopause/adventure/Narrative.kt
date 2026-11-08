@@ -21,6 +21,24 @@ interface NarrativeProvider {
     fun describeLocation(location: Location, npcs: List<Npc>, exits: List<String>): List<String>?
 
     fun describeOutcome(campaign: Campaign, events: List<GameEvent>): List<String>?
+
+    /**
+     * The whole scene in one call. Providers that need a single request (a model) override this;
+     * the default composes the two methods above.
+     */
+    fun narrateScene(
+        campaign: Campaign,
+        events: List<GameEvent>,
+        preferLocationFirst: Boolean,
+    ): List<String>? {
+        val location = campaign.world.locations[campaign.currentLocationId]
+        val npcs = campaign.world.npcs.values.filter { it.locationId == campaign.currentLocationId }
+        val exits = location?.connections.orEmpty().mapNotNull { campaign.world.locations[it]?.name }
+        val outcome = describeOutcome(campaign, events).orEmpty()
+        val place = location?.let { describeLocation(it, npcs, exits) }.orEmpty()
+        return (if (preferLocationFirst) place + outcome else outcome + place)
+            .filter { it.isNotBlank() }
+    }
 }
 
 /**
@@ -76,31 +94,6 @@ class DeterministicNarrator : NarrativeProvider {
 }
 
 /**
- * Placeholder for a model-backed narrator. It is intentionally inert: no endpoint, no key, no
- * silent fallback pretending to be generated prose. `configured` stays false until the app is
- * given provider settings (see docs/adventure.md).
- */
-class LlmNarrator(
-    private val endpoint: String? = null,
-    private val apiKey: String? = null,
-    private val model: String? = null,
-) : NarrativeProvider {
-
-    val configured: Boolean = !endpoint.isNullOrBlank() && !apiKey.isNullOrBlank() && !model.isNullOrBlank()
-
-    override val id = "llm"
-    override val status = if (configured) {
-        "Andy · AI dungeon master: $model via $endpoint"
-    } else {
-        "Andy · AI dungeon master not configured (endpoint, model and key are required)"
-    }
-
-    override fun describeLocation(location: Location, npcs: List<Npc>, exits: List<String>): List<String>? = null
-
-    override fun describeOutcome(campaign: Campaign, events: List<GameEvent>): List<String>? = null
-}
-
-/**
  * Turns committed events plus the current location into the exact lines the TTS engine speaks.
  * One line at a time is what makes the cough checkpoint meaningful: pausing restarts the line that
  * was interrupted, not the whole scene.
@@ -118,14 +111,8 @@ object NarrationScriptBuilder {
         narrator: NarrativeProvider,
         preferLocationFirst: Boolean,
     ): List<dev.harness.coughtopause.core.ScriptLine> {
-        val location = campaign.world.locations[campaign.currentLocationId]
-        val npcsHere = campaign.world.npcs.values.filter { it.locationId == campaign.currentLocationId }
-        val exits = location?.connections.orEmpty().mapNotNull { campaign.world.locations[it]?.name }
-
-        val outcome = narrator.describeOutcome(campaign, events).orEmpty()
-        val place = location?.let { narrator.describeLocation(it, npcsHere, exits) }.orEmpty()
-
-        val texts = (if (preferLocationFirst) place + outcome else outcome + place)
+        val texts = narrator.narrateScene(campaign, events, preferLocationFirst)
+            .orEmpty()
             .filter { it.isNotBlank() }
             .take(MAX_LINES)
 
