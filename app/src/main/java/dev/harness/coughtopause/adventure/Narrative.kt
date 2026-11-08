@@ -29,7 +29,7 @@ interface NarrativeProvider {
  */
 class DeterministicNarrator : NarrativeProvider {
     override val id = "deterministic"
-    override val status = "Scripted narration (no AI dungeon master configured)"
+    override val status = "Andy · scripted narration (no AI dungeon master configured)"
 
     override fun describeLocation(location: Location, npcs: List<Npc>, exits: List<String>): List<String> {
         val lines = mutableListOf<String>()
@@ -90,9 +90,9 @@ class LlmNarrator(
 
     override val id = "llm"
     override val status = if (configured) {
-        "AI dungeon master: $model via $endpoint"
+        "Andy · AI dungeon master: $model via $endpoint"
     } else {
-        "AI dungeon master: not configured (endpoint, model and key are required)"
+        "Andy · AI dungeon master not configured (endpoint, model and key are required)"
     }
 
     override fun describeLocation(location: Location, npcs: List<Npc>, exits: List<String>): List<String>? = null

@@ -65,10 +65,12 @@ data class NarrationSnapshot(
     val generation: Long,
     val counters: Counters,
     val lastEvent: LastEvent?,
-) {
-    val currentLineText: String?
-        get() = NarrationScript.lineAt(currentLineIndex)?.text
-}
+    /**
+     * Text of the line being spoken, taken from the controller's *current* script. It must not be
+     * looked up in the harness script: an RPG scene has its own lines at the same indices.
+     */
+    val currentLineText: String? = null,
+)
 
 /** Commands the state machine emits for the Android layer to execute. */
 sealed interface NarrationAction {
@@ -148,6 +150,7 @@ class NarrationController(
         status = status,
         currentLineIndex = currentLineIndex,
         currentLineId = script.getOrNull(currentLineIndex)?.id,
+        currentLineText = script.getOrNull(currentLineIndex)?.text,
         checkpoint = checkpoint,
         generation = generation,
         counters = counters,

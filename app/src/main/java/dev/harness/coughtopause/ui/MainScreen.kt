@@ -140,8 +140,9 @@ private fun StatusCard(state: UiState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val lineText = checkpoint?.let { cp -> NarrationScript.lineAt(cp.lineIndex)?.text }
-                ?: narration.currentLineText
+            // The controller reports the text from whichever script it currently holds (harness or
+            // an RPG scene), so no lookup against the harness script here.
+            val lineText = narration.currentLineText
             Text(
                 lineText ?: "Press Start to narrate the twelve-line harness script.",
                 style = MaterialTheme.typography.bodyMedium,

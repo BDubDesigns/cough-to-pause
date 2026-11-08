@@ -40,6 +40,8 @@ import dev.harness.coughtopause.core.DspResult
 import dev.harness.coughtopause.core.GateResult
 import dev.harness.coughtopause.core.NarrationAction
 import dev.harness.coughtopause.core.NarrationController
+import dev.harness.coughtopause.adventure.MicOwner
+import dev.harness.coughtopause.adventure.MicOwnership
 import dev.harness.coughtopause.core.NarrationScript
 import dev.harness.coughtopause.core.NarrationSnapshot
 import dev.harness.coughtopause.core.ScriptLine
@@ -88,6 +90,7 @@ class NarrationService : Service() {
     }
     private var lastPolicyStatus: PlaybackStatus? = null
     private var sliceActive = false
+    private val micOwnership = MicOwnership()
     private var lastWatchdogWindows: Long = -1
     private var lastWatchdogEngine: CoughAudioEngine? = null
 
@@ -296,30 +299,60 @@ class NarrationService : Service() {
         handler.removeCallbacks(voiceSliceRunnable)
         handler.removeCallbacks(voiceSliceEndRunnable)
         sliceActive = false
-        when (status) {
-            PlaybackStatus.PAUSED -> micExecutor.execute {
-                setDetectorWanted(false)
-                setVoiceWanted(true)
-            }
-            PlaybackStatus.PLAYING -> {
-                micExecutor.execute {
-                    setVoiceWanted(false)
-                    setDetectorWanted(true)
-                }
-                if (settings.voiceSlicesWhilePlaying) {
-                    handler.postDelayed(voiceSliceRunnable, voiceSliceEveryMs)
-                }
-            }
-            else -> micExecutor.execute {
-                setVoiceWanted(false)
-                setDetectorWanted(true)
-            }
+        val owner = micOwnership.onPlaybackStatus(status)
+        applyOwner(owner)
+        if (status == PlaybackStatus.PLAYING && settings.voiceSlicesWhilePlaying && !micOwnership.isWindowOpen) {
+            handler.postDelayed(voiceSliceRunnable, voiceSliceEveryMs)
         }
         HarnessState.log(
-            "mic policy: $status → ${if (status == PlaybackStatus.PAUSED) "recogniser" else "detector"}" +
+            "mic policy: $status → $owner" +
                 if (settings.voiceSlicesWhilePlaying) " (voice slices on)" else " (continuous detection)",
         )
     }
+
+    /** Translate the single ownership decision into start/stop calls. */
+    private fun applyOwner(owner: MicOwner) {
+        micExecutor.execute {
+            when (owner) {
+                MicOwner.DETECTOR -> {
+                    setVoiceWanted(false)
+                    setDetectorWanted(true)
+                }
+                MicOwner.HARNESS_ASR -> {
+                    setDetectorWanted(false)
+                    setVoiceWanted(true)
+                }
+                MicOwner.ADVENTURE_ASR, MicOwner.NONE -> {
+                    setVoiceWanted(false)
+                    setDetectorWanted(false)
+                }
+            }
+        }
+    }
+
+    /**
+     * Hand the microphone to the adventure screen's one-shot recogniser.
+     *
+     * Without this the recogniser gets no audio: the detector holds the AudioRecord, and Android
+     * grants capture to one client at a time. The window is bounded and always closes.
+     */
+    private fun openVoiceWindow(durationMs: Int) {
+        val owner = micOwnership.openAdventureWindow()
+        applyOwner(owner)
+        handler.removeCallbacks(closeWindowRunnable)
+        handler.postDelayed(closeWindowRunnable, durationMs.toLong())
+        HarnessState.log("mic: adventure voice window open (${durationMs}ms) → $owner")
+    }
+
+    private fun closeVoiceWindow() {
+        if (!micOwnership.isWindowOpen) return
+        handler.removeCallbacks(closeWindowRunnable)
+        val owner = micOwnership.closeAdventureWindow(controller.snapshot().status)
+        applyOwner(owner)
+        HarnessState.log("mic: adventure voice window closed → $owner")
+    }
+
+    private val closeWindowRunnable = Runnable { closeVoiceWindow() }
 
     private val voiceSliceRunnable = Runnable { startVoiceSlice() }
     private val voiceSliceEndRunnable = Runnable { endVoiceSlice() }
@@ -485,6 +518,13 @@ class NarrationService : Service() {
                 HarnessState.update { it.copy(nearMisses = emptyList()) }
                 HarnessState.update { it.copy(metrics = metrics.snapshot()) }
                 HarnessState.log("metrics reset")
+            }
+            ACTION_VOICE_WINDOW -> {
+                if (intent.getBooleanExtra(EXTRA_WINDOW_OPEN, true)) {
+                    openVoiceWindow(intent.getIntExtra(EXTRA_WINDOW_MS, 8_000))
+                } else {
+                    closeVoiceWindow()
+                }
             }
             ACTION_REFRESH_ROUTE -> refreshRoute()
             ACTION_ENSURE_RUNNING -> Unit
@@ -969,6 +1009,9 @@ class NarrationService : Service() {
         const val ACTION_REFRESH_ROUTE = "dev.harness.coughtopause.REFRESH_ROUTE"
         const val ACTION_ENSURE_RUNNING = "dev.harness.coughtopause.ENSURE_RUNNING"
         const val ACTION_NARRATE_SCENE = "dev.harness.coughtopause.NARRATE_SCENE"
+        const val ACTION_VOICE_WINDOW = "dev.harness.coughtopause.VOICE_WINDOW"
+        const val EXTRA_WINDOW_OPEN = "window_open"
+        const val EXTRA_WINDOW_MS = "window_ms"
         const val EXTRA_SCENE_ID = "scene_id"
         const val EXTRA_LINES = "scene_lines"
 
@@ -986,6 +1029,20 @@ class NarrationService : Service() {
         }
 
         fun startNarration(context: Context) = send(context, ACTION_START_NARRATION)
+
+        /** Hand the microphone to an external one-shot recogniser for a bounded window. */
+        fun openVoiceWindow(context: Context, durationMs: Int = 8_000) {
+            val intent = Intent(context, NarrationService::class.java).setAction(ACTION_VOICE_WINDOW)
+            intent.putExtra(EXTRA_WINDOW_OPEN, true)
+            intent.putExtra(EXTRA_WINDOW_MS, durationMs)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun closeVoiceWindow(context: Context) {
+            val intent = Intent(context, NarrationService::class.java).setAction(ACTION_VOICE_WINDOW)
+            intent.putExtra(EXTRA_WINDOW_OPEN, false)
+            ContextCompat.startForegroundService(context, intent)
+        }
 
         /** Narrate an RPG scene through the same checkpoint engine as the harness script. */
         fun narrateScene(context: Context, sceneId: String, lines: List<String>) {

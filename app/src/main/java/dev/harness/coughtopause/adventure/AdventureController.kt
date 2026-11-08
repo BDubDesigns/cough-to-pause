@@ -34,7 +34,7 @@ data class AdventureUiState(
     val busy: Boolean = false,
     val message: String? = null,
     val voice: VoiceState = VoiceState.Idle,
-    val narrationSource: String = "Scripted narration (no AI dungeon master configured)",
+    val narrationSource: String = DeterministicNarrator().status,
     val hasCampaign: Boolean = false,
 )
 
@@ -119,6 +119,9 @@ class AdventureController(private val context: Context) {
         }
         _state.update { it.copy(busy = true, message = null) }
         executor.execute {
+            // "Andy, go to the inn" and "go to the inn" are the same action. The name is an
+            // address, not a wake word: nothing listens for it in the background.
+            val action = WakePhrase.actionFrom(text)
             val world = WorldView(
                 locationId = current.currentLocationId.value,
                 locations = current.world.locations.values.map { it.id.value to it.name },
@@ -126,7 +129,7 @@ class AdventureController(private val context: Context) {
                     .filter { it.locationId == current.currentLocationId }
                     .map { it.id.value to it.name },
             )
-            val intent = interpreter.interpret(text, world)
+            val intent = interpreter.interpret(action, world)
             transcript += "> $text"
             when (intent) {
                 is AdventureIntent.Look -> {
@@ -201,6 +204,7 @@ class AdventureController(private val context: Context) {
             _state.update { it.copy(busy = false) }
             return
         }
+        lines.forEach { transcript += "${WakePhrase.NAME}: ${it.text}" }
         NarrationService.narrateScene(
             context,
             NarrationScriptBuilder.sceneId(current, events),
@@ -228,6 +232,8 @@ class AdventureController(private val context: Context) {
             _state.update { it.copy(voice = VoiceState.Failed("no speech recogniser on this device")) }
             return
         }
+        // The detector owns the microphone while narrating; hand it over before listening.
+        NarrationService.openVoiceWindow(context, VOICE_WINDOW_MS)
         val capture = VoiceCapture(clock = { android.os.SystemClock.elapsedRealtime() })
         voice = capture
         _state.update { it.copy(voice = capture.start()) }
@@ -241,12 +247,14 @@ class AdventureController(private val context: Context) {
                     _state.update { it.copy(voice = next) }
                     if (next is VoiceState.Captured) act(next.text)
                     stopVoice()
+                    NarrationService.closeVoiceWindow(context)
                 }
 
                 override fun onError(error: Int) {
                     val next = capture.onError(error)
                     _state.update { it.copy(voice = next) }
                     stopVoice()
+                    NarrationService.closeVoiceWindow(context)
                 }
 
                 override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -272,7 +280,12 @@ class AdventureController(private val context: Context) {
             override fun run() {
                 val next = capture.tick()
                 if (next != _state.value.voice) _state.update { it.copy(voice = next) }
-                if (capture.isListening) main.postDelayed(this, 500) else stopVoice()
+                if (capture.isListening) {
+                    main.postDelayed(this, 500)
+                } else {
+                    stopVoice()
+                    NarrationService.closeVoiceWindow(context)
+                }
             }
         }
         main.postDelayed(ticker, 500)
@@ -283,10 +296,16 @@ class AdventureController(private val context: Context) {
         recognizer = null
         voice?.reset()
         voice = null
+        NarrationService.closeVoiceWindow(context)
     }
 
     fun shutdown() {
         stopVoice()
         executor.shutdownNow()
+    }
+
+    private companion object {
+        /** Bounded: a window that never closes would leave the cough detector off. */
+        const val VOICE_WINDOW_MS = 8_000
     }
 }

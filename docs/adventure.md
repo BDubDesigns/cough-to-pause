@@ -29,6 +29,65 @@ Refs [#1](https://github.com/BDubDesigns/cough-to-pause/issues/1).
 8. **M0 preserved.** `Start` on the harness screen always reloads the harness script, so the audio
    experiment is unchanged.
 
+## Talking to Andy
+
+The dungeon master is called **Andy** in the UI, in the journal, and in the narration provenance
+line.
+
+The name is an optional **address prefix**, not a wake word:
+
+- Typed: `Andy, go to the inn` and `go to the inn` are the same action.
+- Spoken: tap **Speak**, then say `Andy, look around` or just `look around`.
+- `Andy?` or `hey Andy` on its own asks Andy to describe where you are.
+
+`WakePhrase.strip` removes one leading `andy` / `hey andy` / `okay andy` (with punctuation,
+case-insensitive) and otherwise leaves the text untouched, so `candy shop` is not treated as an
+address. Nothing listens for the name in the background in this slice.
+
+## Hands-free design (next slice — not implemented here)
+
+The intended loop, recorded so the next slice does not invent a different one:
+
+1. Andy finishes a narration prompt; the app opens a **short contextual response window**.
+2. During the window, speech recognition owns the microphone and the detector is off.
+3. Silence or window timeout does nothing: no action, no error, and the detector comes back.
+4. A recognised utterance becomes the player's action, exactly as if typed.
+5. Outside contextual windows, **"Hey Andy"** will activate the window (wake word).
+6. Meanwhile cough detection is unchanged: a cough pauses narration, "Play" resumes that line.
+
+This PR implements the **handoff primitive** that loop needs — `MicOwnership` plus the service's
+bounded voice window — but the window is opened by tapping Speak, not automatically.
+
+### Microphone ownership
+
+| State | Owner | Why |
+| --- | --- | --- |
+| Andy narrating | cough detector | continuous detection; a cough must never be missed |
+| Paused | harness recogniser | coughs are ignored while paused; "Play"/"Resume" must work |
+| Adventure voice window open | adventure recogniser | the player explicitly asked to speak |
+| Window closed | back to the playback policy | the detector returns immediately |
+
+Rules are implemented in `MicOwnership` (pure, unit tested) and enforced by
+`NarrationService.applyOwner`. The window is bounded (8 s) and closes on result, error, timeout or
+an explicit stop, so the detector can never be left switched off.
+
+## Wake word: evaluate before training
+
+A wake word is **not** in this PR. Before proposing a custom model, evaluate off-the-shelf on-device
+engines:
+
+| Option | Custom word for "Andy" | Data needed | Notes |
+| --- | --- | --- | --- |
+| **Porcupine** (Picovoice), low-level API | Yes — keyword trained in the Console or via the training API, downloaded as a `.ppn` | **None** | Accepts raw PCM frames, so it can consume the detector's existing 16 kHz stream without a second capture. Needs an AccessKey and a licence check for shipping. |
+| openWakeWord | Limited set of pretrained words per model | Depends on the word | ONNX rather than TFLite; would need an ONNX runtime added. |
+| sherpa-onnx KWS | Yes, with pretrained keyword-spotting models | None for common words | Open source, on-device, larger runtime. |
+| Custom TFLite model | Yes | Recordings plus off-device training | Last resort, not first. |
+
+Earlier notes in this repo said a custom wake word needs "hundreds of recordings" — that is wrong
+for Porcupine, which trains custom keywords **without** user data. Try the Porcupine low-level API
+on the detector's stream first, measure false accepts while Andy narrates, and suppress detection
+while TTS is speaking (Andy's own narration says its name).
+
 ## What is not AI
 
 | Part | Today | To become a real dungeon master |

@@ -55,7 +55,14 @@ fun AdventureScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Adventure", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Column {
+                Text("Andy", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "your dungeon master",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             TextButton(onClick = onBack) { Text("Harness") }
         }
 
@@ -201,7 +208,10 @@ private fun ActionCard(
     val listening = adventure.voice == VoiceState.Listening
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("What do you do?", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "What do you do? (say or type “Andy, …”)",
+                style = MaterialTheme.typography.titleMedium,
+            )
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
