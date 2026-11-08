@@ -58,6 +58,11 @@ For GitHub: `gh pr checks <n> --watch --interval 10` blocks by itself. Exit `1` 
 ## Review and merge
 
 - Do not merge pull requests, close issues, or push to `main` unless explicitly asked.
+- **Write `Part of #N` or `Refs #N` for partial work, never a negated closing keyword.** GitHub
+  matches `close`/`closes`/`closed`, `fix`/`fixes`/`fixed` and `resolve`/`resolves`/`resolved`
+  followed by `#N` literally, with no negation: a description saying "does not close #1" still links
+  and closes #1 on merge. The same applies to commit messages. To unlink, edit the description to
+  remove the keyword.
 - Keep changes scoped. Do not change audio behaviour — detection thresholds, microphone ownership,
   TTS routing — as a side effect of unrelated work.
 - Report what you verified and how. On failure, quote the failing lines instead of summarising the
