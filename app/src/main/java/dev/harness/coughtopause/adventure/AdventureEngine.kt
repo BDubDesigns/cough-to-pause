@@ -50,6 +50,8 @@ data class AdventureSnapshot(
     val gold: Int,
     val attributes: List<Pair<String, Int>>,
     val skills: List<Pair<String, Int>>,
+    /** Every roll in the campaign, newest first. The audit trail the review asked for. */
+    val rolls: List<RollView>,
     val lastRoll: RollView?,
     val transcript: List<String>,
     val narrationSource: String,
@@ -120,7 +122,7 @@ class AdventureEngine(
         val exits = location?.connections.orEmpty().mapNotNull { id ->
             campaign.world.locations[id]?.name
         }
-        val lastRoll = campaign.rolls.lastOrNull()?.let { roll ->
+        val allRolls = campaign.rolls.map { roll ->
             val xp = campaign.events
                 .filter { it.actionId == roll.actionId }
                 .mapNotNull { (it.payload as? dev.harness.coughtopause.rpg.EventPayload.SkillXp) }
@@ -133,7 +135,8 @@ class AdventureEngine(
                 outcome = roll.outcome.name.lowercase().replace('_', ' '),
                 xpGained = xp,
             )
-        }
+        }.reversed()
+        val lastRoll = allRolls.firstOrNull()
         return AdventureSnapshot(
             campaignId = campaign.id.value,
             characterName = campaign.player.name,
@@ -160,6 +163,7 @@ class AdventureEngine(
             ).map { skill ->
                 skill.value to (campaign.player.skillXp[skill] ?: 0)
             },
+            rolls = allRolls,
             lastRoll = lastRoll,
             transcript = transcript.takeLast(40),
             narrationSource = narrationSource,

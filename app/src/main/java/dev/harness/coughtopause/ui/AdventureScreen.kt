@@ -102,6 +102,25 @@ fun AdventureScreen(
                     }
                 }
             }
+            if (snapshot.rolls.size > 1) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Roll history (${snapshot.rolls.size})", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Every roll in this campaign, newest first, read from the saved event log.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        snapshot.rolls.take(20).forEach { r ->
+                            Text(
+                                "${r.skill}: d20 ${r.natural ?: "—"} · ${r.total ?: "—"} vs ${r.dc ?: "—"} · " +
+                                    "${r.outcome}${if (r.xpGained > 0) " · +${r.xpGained}xp" else ""}",
+                                style = TelemetryStyle,
+                            )
+                        }
+                    }
+                }
+            }
             ActionCard(adventure, onAct, onSpeak, onStopVoice, onNarrateAgain)
             AutoListenCard(adventure.autoListen, onAutoListenChange)
             TranscriptCard(snapshot)
