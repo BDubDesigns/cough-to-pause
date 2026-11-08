@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CoughToPause"
 include(":app")
+include(":rpg")
