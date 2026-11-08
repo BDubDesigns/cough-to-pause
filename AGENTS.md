@@ -28,12 +28,21 @@ Pattern (POSIX shell; choose a bound under your tool's timeout):
 MARKER=/tmp/job.exit; LOG=/tmp/job.log
 rm -f "$MARKER"                                  # never trust a stale marker
 ( { <command>; } > "$LOG" 2>&1; echo $? > "$MARKER" ) &
-timeout 540 sh -c 'while [ ! -f "$MARKER" ]; do sleep 2; done'
+job=$!
+# Pass the path as an argument: the child shell does not inherit unexported variables, so
+# 'sh -c' with "$MARKER" inside single quotes would test an empty path and always time out.
+timeout 540 sh -c 'while [ ! -f "$1" ]; do sleep 2; done' _ "$MARKER"
 rc=$?
-[ "$rc" = 124 ] && echo "STILL RUNNING after 540s — check before retrying"
-echo "exit=$(cat "$MARKER" 2>/dev/null || echo unknown)"
+if [ "$rc" = 124 ]; then
+  echo "STILL RUNNING after 540s (pid $job, log $LOG) — check before retrying"
+else
+  echo "exit=$(cat "$MARKER")"
+fi
 tail -n 20 "$LOG"
 ```
+
+`rc=124` means the bound expired, not that the job failed. The job is still alive at that point, so
+`kill -0 "$job"` confirms it before you decide to wait again or stop it — never start a second copy.
 
 Two notes that are easy to get wrong:
 
