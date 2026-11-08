@@ -21,6 +21,11 @@ Refs [#1](https://github.com/BDubDesigns/cough-to-pause/issues/1).
 5. **Exploration, NPCs, one check.** `go to <place>` → `Travel`; `talk to <name>` → NPC description;
    any skill keyword (`search`, `climb`, `persuade`, `read`, …) → `AttemptCheck` with a MODERATE
    tier, the NPC or location as subject, and `RollImportance.IMPORTANT`.
+5b. **Conversation with consequences.** `ask <name> about <topic>` runs that NPC's topic check
+   (lore or persuasion). Success commits the authored fact to the world through the engine's
+   proposal validator and Andy narrates it; failure deflects. `ask` with an unknown topic lists
+   what they will discuss. Topics are authored data in `NpcTopics` — a conversation reveals facts,
+   it never invents them.
 6. **Dice and progression on screen.** The last roll shows d20, total, DC and outcome; skill XP is
    listed per skill.
 7. **Persistence.** Every command goes through `ActionProcessor`, which saves atomically. Relaunching
@@ -121,7 +126,7 @@ AI call. `StartEncounter` and `SpendGold` exist in the engine but are not wired 
 
 1. Open the app → **Adventure →**.
 2. Name your character, pick a background, tap **Begin**. You should hear the starting location.
-3. Try: `look`, `go to the inn`, `talk to <name>`, `search the room`, `persuade <name>`.
+3. Try: `look`, `go to the inn`, `talk to <name>`, `ask <name> about the barrow`, `search the room`, `persuade <name>`.
 4. Cough mid-line: narration pauses; say "Play" and that line restarts.
 5. Force-stop the app, reopen it: the same campaign and the same checkpoint come back.
 

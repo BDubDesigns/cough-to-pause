@@ -3,6 +3,7 @@ package dev.harness.coughtopause.adventure
 import dev.harness.coughtopause.rpg.DifficultyTier
 import dev.harness.coughtopause.rpg.SkillCatalog
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,7 +13,10 @@ class IntentInterpreterTest {
     private val world = WorldView(
         locationId = "village",
         locations = listOf("village" to "Thornwick", "inn" to "The Drowned Lantern"),
-        npcs = listOf("npc-1" to "Mira", "npc-2" to "Harun"),
+        npcs = listOf(
+            NpcView("npc-1", "Mira", listOf("help" to "helping her")),
+            NpcView("npc-2", "Harun", listOf("road" to "the coast road")),
+        ),
     )
 
     @Test
@@ -39,6 +43,22 @@ class IntentInterpreterTest {
         val intent = interpreter.interpret("talk to Harun", world)
         assertTrue(intent is AdventureIntent.Talk)
         assertEquals("npc-2", (intent as AdventureIntent.Talk).npc.value)
+    }
+
+    @Test
+    fun askKeepsTheTopicSoTheCheckCanBeApplied() {
+        val intent = interpreter.interpret("ask Harun about the coast road", world)
+        assertTrue("expected Ask, got $intent", intent is AdventureIntent.Ask)
+        val ask = intent as AdventureIntent.Ask
+        assertEquals("npc-2", ask.npc.value)
+        assertEquals("road", ask.topicKey)
+    }
+
+    @Test
+    fun askWithoutAKnownTopicStillTargetsTheNpc() {
+        val ask = interpreter.interpret("ask Mira about the weather", world) as AdventureIntent.Ask
+        assertEquals("npc-1", ask.npc.value)
+        assertNull("unknown topic must not be guessed", ask.topicKey)
     }
 
     @Test

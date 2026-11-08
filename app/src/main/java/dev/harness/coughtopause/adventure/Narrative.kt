@@ -84,6 +84,9 @@ class DeterministicNarrator : NarrativeProvider {
                 }
                 is EventPayload.GoldSpent ->
                     lines += "You spend ${payload.amount} gold on ${payload.purpose}."
+                is EventPayload.WorldContentAccepted -> payload.facts.forEach { factId ->
+                    campaign.world.facts.firstOrNull { it.id == factId }?.let { lines += it.text }
+                }
                 is EventPayload.EncounterStarted ->
                     lines += "Something hostile is here (combat is not part of this slice)."
                 else -> Unit
@@ -110,9 +113,10 @@ object NarrationScriptBuilder {
         events: List<GameEvent>,
         narrator: NarrativeProvider,
         preferLocationFirst: Boolean,
+        /** Extra spoken lines that are not events, e.g. a fact an NPC has just confirmed. */
+        extraLines: List<String> = emptyList(),
     ): List<dev.harness.coughtopause.core.ScriptLine> {
-        val texts = narrator.narrateScene(campaign, events, preferLocationFirst)
-            .orEmpty()
+        val texts = (narrator.narrateScene(campaign, events, preferLocationFirst).orEmpty() + extraLines)
             .filter { it.isNotBlank() }
             .take(MAX_LINES)
 
