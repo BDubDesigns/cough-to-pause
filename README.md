@@ -54,6 +54,7 @@ Requires the toolchain from `android_sdk_install`: OpenJDK 21, `aapt2` (aarch64)
 ```sh
 ./scripts/build.sh :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./scripts/build.sh :app:testDebugUnitTest    # 52 JVM tests
+./scripts/build.sh :rpg:test                 # RPG rules module, pure JVM
 ```
 
 Three Android-specific overrides are baked into `scripts/build.sh`, each one discovered the hard way:
@@ -90,7 +91,8 @@ app/src/main/java/dev/harness/coughtopause/
   service/     foreground service (mic type), media session, notification, persistence
   ui/          Compose screens
 app/src/test/java/...  52 tests: state machine, races, persistence, gate, DSP, calibration
-docs/          playtest protocol, measurements, detector recommendation
+rpg/           M1 RPG rules (pure Kotlin/JVM, not yet wired into the app) — see docs/rpg-domain.md
+docs/          playtest protocol, measurements, detector recommendation, RPG domain contracts
 ```
 
 ## Honest limitations
@@ -117,5 +119,7 @@ docs/          playtest protocol, measurements, detector recommendation
 
 ## Out of scope
 
-RPG systems, LLM integration, world generation, inventory/combat/progression, wake phrases beyond the
+The M0 harness itself contains no RPG systems. M1 is under way in [issue #1](https://github.com/BDubDesigns/cough-to-pause/issues/1):
+the deterministic rules foundation lives in the separate `:rpg` module ([`docs/rpg-domain.md`](docs/rpg-domain.md))
+and is not yet connected to the audio app. Still out of scope for the harness: LLM integration, world generation, inventory/combat/progression, wake phrases beyond the
 required pause/resume controls, multiplayer, monetisation, backend services.
