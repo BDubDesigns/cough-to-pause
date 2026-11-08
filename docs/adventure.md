@@ -92,7 +92,7 @@ while TTS is speaking (Andy's own narration says its name).
 
 | Part | Today | To become a real dungeon master |
 | --- | --- | --- |
-| Narration | `DeterministicNarrator` — prose derived from committed facts and resolved events | `LlmNarrator` (the seam exists, returns `null` when unconfigured) |
+| Narration | `DeterministicNarrator`, or `LlmNarrator` when a key is configured ([setup](ai-dm.md)) | world generation and model-proposed intent |
 | Intent parsing | `IntentInterpreter` — keyword → command | A prompt that emits `CheckRequest`/`Travel` candidates for the engine to validate |
 | World generation | `FallbackRegion` only | `WorldProposalParser` + `CommitWorldProposal` behind the same validator |
 

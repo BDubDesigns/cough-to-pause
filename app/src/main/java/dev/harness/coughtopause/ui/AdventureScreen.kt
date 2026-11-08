@@ -46,6 +46,8 @@ fun AdventureScreen(
     onNarrateAgain: () -> Unit,
     onNewAdventure: () -> Unit,
     onDeleteSaves: () -> Unit,
+    onSaveAi: (String, String, String) -> Unit,
+    onTestAi: () -> Unit,
     onBack: () -> Unit,
 ) {
     val snapshot = adventure.snapshot
@@ -102,6 +104,8 @@ fun AdventureScreen(
             ActionCard(adventure, onAct, onSpeak, onStopVoice, onNarrateAgain)
             TranscriptCard(snapshot)
         }
+
+        AiSettingsCard(adventure, onSaveAi, onTestAi)
 
         adventure.message?.let { message ->
             Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -248,6 +252,68 @@ private fun ActionCard(
                 style = TelemetryStyle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun AiSettingsCard(
+    adventure: AdventureUiState,
+    onSave: (String, String, String) -> Unit,
+    onTest: () -> Unit,
+) {
+    var baseUrl by remember { mutableStateOf(adventure.aiBaseUrl) }
+    var model by remember { mutableStateOf(adventure.aiModel) }
+    var key by remember { mutableStateOf("") }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("AI dungeon master", style = MaterialTheme.typography.titleMedium)
+            Text(
+                adventure.aiStatus,
+                style = TelemetryStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Optional. Without a key Andy narrates from the engine's own facts. The key is stored " +
+                    "on this device only (Keystore-backed), never in the app or the repo, and is only " +
+                    "sent to the endpoint you enter here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = { baseUrl = it },
+                label = { Text("Base URL") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                label = { Text("Model") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it },
+                label = { Text(if (adventure.aiKeyPresent) "API key (stored — paste to replace)" else "API key") },
+                singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onSave(baseUrl, model, key) }, enabled = !adventure.busy) {
+                    Text("Save")
+                }
+                OutlinedButton(onClick = onTest, enabled = adventure.aiConfigured && !adventure.busy) {
+                    Text("Test")
+                }
+            }
+            adventure.aiLastError?.let { error ->
+                Text("last error: $error", style = TelemetryStyle, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }

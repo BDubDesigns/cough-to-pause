@@ -54,6 +54,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-service:2.11.0")
 
     implementation(project(":rpg"))
+    implementation("androidx.security:security-crypto:1.1.0")
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
     testImplementation("junit:junit:4.13.2")

@@ -36,6 +36,12 @@ data class AdventureUiState(
     val voice: VoiceState = VoiceState.Idle,
     val narrationSource: String = DeterministicNarrator().status,
     val hasCampaign: Boolean = false,
+    val aiConfigured: Boolean = false,
+    val aiStatus: String = "",
+    val aiBaseUrl: String = AiConfig.DEFAULT_BASE_URL,
+    val aiModel: String = AiConfig.DEFAULT_MODEL,
+    val aiKeyPresent: Boolean = false,
+    val aiLastError: String? = null,
 )
 
 /**
@@ -47,12 +53,22 @@ class AdventureController(private val context: Context) {
 
     private val engine = AdventureEngine(File(context.filesDir, "campaigns"))
     private val interpreter = IntentInterpreter()
-    private val narrator: NarrativeProvider = DeterministicNarrator()
-    private val llm = LlmNarrator()
+    private val aiStore = AiConfigStore(context)
+    private var aiConfig: AiConfig = aiStore.load()
+    private var narrator: NarrativeProvider = buildNarrator(aiConfig)
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "adventure") }
     private val main = Handler(Looper.getMainLooper())
 
-    private val _state = MutableStateFlow(AdventureUiState(narrationSource = narrator.status))
+    private val _state = MutableStateFlow(
+        AdventureUiState(
+            narrationSource = narrator.status,
+            aiConfigured = aiConfig.configured,
+            aiStatus = narrator.status,
+            aiBaseUrl = aiConfig.baseUrl,
+            aiModel = aiConfig.model,
+            aiKeyPresent = aiConfig.apiKey.isNotBlank(),
+        ),
+    )
     val state: StateFlow<AdventureUiState> = _state.asStateFlow()
 
     private var campaign: Campaign? = null
@@ -225,7 +241,14 @@ class AdventureController(private val context: Context) {
 
     private fun narrate(events: List<dev.harness.coughtopause.rpg.GameEvent>, preferLocationFirst: Boolean) {
         val current = campaign ?: return
-        val lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst)
+        var lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst)
+        if (lines.isEmpty() && narrator.id == "llm") {
+            // The model failed: say so once, then narrate deterministically rather than going silent.
+            val reason = (narrator as? LlmNarrator)?.lastError ?: "unavailable"
+            transcript += "(AI unavailable: $reason — scripted narration)"
+            _state.update { it.copy(aiLastError = reason) }
+            lines = NarrationScriptBuilder.build(current, events, DeterministicNarrator(), preferLocationFirst)
+        }
         if (lines.isEmpty()) {
             _state.update { it.copy(busy = false) }
             return
@@ -247,7 +270,60 @@ class AdventureController(private val context: Context) {
                 hasCampaign = current != null,
                 busy = false,
                 narrationSource = narrator.status,
+                aiConfigured = aiConfig.configured,
+                aiStatus = narrator.status,
+                aiBaseUrl = aiConfig.baseUrl,
+                aiModel = aiConfig.model,
+                aiKeyPresent = aiConfig.apiKey.isNotBlank(),
             )
+        }
+    }
+
+    // ---------------------------------------------------------------- AI settings
+
+    private fun buildNarrator(config: AiConfig): NarrativeProvider =
+        if (config.configured) LlmNarrator(config) else DeterministicNarrator()
+
+    fun saveAiConfig(baseUrl: String, model: String, apiKey: String) {
+        val config = AiConfig(
+            baseUrl = baseUrl.trim().ifBlank { AiConfig.DEFAULT_BASE_URL },
+            model = model.trim().ifBlank { AiConfig.DEFAULT_MODEL },
+            apiKey = apiKey.trim(),
+        )
+        aiStore.save(config)
+        aiConfig = config
+        narrator = buildNarrator(config)
+        _state.update {
+            it.copy(
+                aiConfigured = config.configured,
+                aiStatus = narrator.status,
+                aiBaseUrl = config.baseUrl,
+                aiModel = config.model,
+                aiKeyPresent = config.apiKey.isNotBlank(),
+                aiLastError = null,
+                narrationSource = narrator.status,
+                message = if (config.configured) "AI settings saved." else "AI key cleared — scripted narration.",
+            )
+        }
+    }
+
+    /** One tiny request so the player can confirm the key before playing. */
+    fun testAi() {
+        val llm = narrator as? LlmNarrator
+        if (llm == null) {
+            _state.update { it.copy(aiLastError = "no key configured") }
+            return
+        }
+        _state.update { it.copy(busy = true) }
+        executor.execute {
+            val reply = llm.probe()
+            _state.update {
+                it.copy(
+                    busy = false,
+                    aiLastError = llm.lastError,
+                    message = if (reply != null) "AI replied: $reply" else "AI test failed: ${llm.lastError}",
+                )
+            }
         }
     }
 
