@@ -54,6 +54,8 @@ fun MainScreen(
     onFalsePositive: () -> Unit,
     onMissedCough: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenAdventure: () -> Unit,
+    onQuit: () -> Unit,
 ) {
     val narration = state.narration
     val status = narration.status
@@ -92,6 +94,9 @@ fun MainScreen(
                 Text("Diagnostics")
             }
         }
+        Button(onClick = onOpenAdventure, modifier = Modifier.fillMaxWidth()) {
+            Text("Adventure →")
+        }
 
         DetectorCard(state, onBackendChange, onVoiceSlicesChange)
 
@@ -104,6 +109,10 @@ fun MainScreen(
         )
 
         MetricsCard(state, onFalsePositive, onMissedCough)
+
+        TextButton(onClick = onQuit, modifier = Modifier.fillMaxWidth()) {
+            Text("Quit — stop narration and the microphone")
+        }
 
         val error = state.error
         if (error != null) {
@@ -136,8 +145,9 @@ private fun StatusCard(state: UiState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val lineText = checkpoint?.let { cp -> NarrationScript.lineAt(cp.lineIndex)?.text }
-                ?: narration.currentLineText
+            // The controller reports the text from whichever script it currently holds (harness or
+            // an RPG scene), so no lookup against the harness script here.
+            val lineText = narration.currentLineText
             Text(
                 lineText ?: "Press Start to narrate the twelve-line harness script.",
                 style = MaterialTheme.typography.bodyMedium,

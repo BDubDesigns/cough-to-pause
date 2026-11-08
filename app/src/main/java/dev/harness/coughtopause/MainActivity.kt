@@ -28,7 +28,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.harness.coughtopause.adventure.AdventureController
+import dev.harness.coughtopause.adventure.AdventureEngine
 import dev.harness.coughtopause.platform.HarnessState
+import dev.harness.coughtopause.rpg.BackgroundId
+import dev.harness.coughtopause.ui.AdventureScreen
 import dev.harness.coughtopause.platform.SessionStore
 import dev.harness.coughtopause.service.NarrationService
 import dev.harness.coughtopause.ui.DiagnosticsScreen
@@ -52,6 +56,7 @@ class MainActivity : ComponentActivity() {
 private object Screens {
     const val MAIN = 0
     const val DIAGNOSTICS = 1
+    const val ADVENTURE = 2
 }
 
 @Composable
@@ -59,7 +64,14 @@ private fun HarnessApp() {
     val context = LocalContext.current
     val state by HarnessState.state.collectAsStateWithLifecycle()
     val store = remember { SessionStore(context) }
+    val adventureController = remember { AdventureController(context) }
+    val adventureState by adventureController.state.collectAsStateWithLifecycle()
     var screen by remember { mutableIntStateOf(Screens.MAIN) }
+
+    LaunchedEffect(Unit) { adventureController.restore() }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { adventureController.shutdown() }
+    }
     var hasMic by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -90,7 +102,7 @@ private fun HarnessApp() {
         NarrationService.ensureRunning(context)
     }
 
-    BackHandler(enabled = screen == Screens.DIAGNOSTICS) { screen = Screens.MAIN }
+    BackHandler(enabled = screen != Screens.MAIN) { screen = Screens.MAIN }
 
     if (!hasMic) {
         Column(modifier = Modifier.padding(24.dp)) {
@@ -115,6 +127,26 @@ private fun HarnessApp() {
     }
 
     when (screen) {
+        Screens.ADVENTURE -> AdventureScreen(
+            adventure = adventureState,
+            harness = state,
+            backgrounds = AdventureEngine.BACKGROUNDS,
+            onBegin = { name, backgroundId ->
+                adventureController.newAdventure(name, BackgroundId(backgroundId))
+            },
+            onRestore = { adventureController.restore() },
+            onAct = { adventureController.act(it) },
+            onSpeak = { adventureController.startVoice() },
+            onStopVoice = { adventureController.stopVoice() },
+            onNarrateAgain = { adventureController.act("look") },
+            onNewAdventure = { adventureController.startFresh() },
+            onDeleteSaves = { adventureController.deleteAllCampaigns() },
+            onBack = {
+                NarrationService.enterHarness(context)
+                screen = Screens.MAIN
+            },
+        )
+
         Screens.DIAGNOSTICS -> DiagnosticsScreen(
             state = state,
             onBack = { screen = Screens.MAIN },
@@ -146,6 +178,15 @@ private fun HarnessApp() {
             onFalsePositive = { NarrationService.markFalsePositive(context) },
             onMissedCough = { NarrationService.markMissed(context) },
             onOpenDiagnostics = { screen = Screens.DIAGNOSTICS },
+            onOpenAdventure = {
+                // Drop the harness checkpoint so "Play" cannot resume the M0 test dialogue.
+                NarrationService.enterAdventure(context)
+                screen = Screens.ADVENTURE
+            },
+            onQuit = {
+                NarrationService.quit(context)
+                (context as? android.app.Activity)?.finish()
+            },
         )
     }
 }

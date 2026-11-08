@@ -139,3 +139,35 @@ object CalibrationCodec {
         }
     }
 }
+
+/** Scene scripts (RPG narration) round-tripped through JSON so a checkpoint can be restored. */
+object SceneCodec {
+
+    fun encode(lines: List<ScriptLine>): String {
+        val array = org.json.JSONArray()
+        lines.forEach { line ->
+            array.put(
+                JSONObject().apply {
+                    put("id", line.id)
+                    put("index", line.index)
+                    put("text", line.text)
+                },
+            )
+        }
+        return array.toString()
+    }
+
+    fun decode(json: String?): List<ScriptLine>? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            val array = org.json.JSONArray(json)
+            val lines = (0 until array.length()).map { i ->
+                val o = array.getJSONObject(i)
+                ScriptLine(o.getString("id"), o.optInt("index", i), o.getString("text"))
+            }
+            lines.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+}

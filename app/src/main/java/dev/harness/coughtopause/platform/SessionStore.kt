@@ -5,6 +5,7 @@ import dev.harness.coughtopause.core.CalibrationCodec
 import dev.harness.coughtopause.core.CalibrationResult
 import dev.harness.coughtopause.core.DetectorSettings
 import dev.harness.coughtopause.core.PersistedSession
+import dev.harness.coughtopause.core.SceneCodec
 import dev.harness.coughtopause.core.SessionCodec
 import dev.harness.coughtopause.core.SettingsCodec
 
@@ -34,6 +35,20 @@ class SessionStore(context: Context) {
     fun loadSettings(): DetectorSettings =
         SettingsCodec.decode(prefs.getString(KEY_SETTINGS, null)) ?: DetectorSettings()
 
+    /** The lines of the scene currently being narrated, so a checkpoint survives process death. */
+    fun saveScene(scriptId: String, lines: List<dev.harness.coughtopause.core.ScriptLine>) {
+        prefs.edit()
+            .putString(KEY_SCENE_ID, scriptId)
+            .putString(KEY_SCENE_LINES, SceneCodec.encode(lines))
+            .apply()
+    }
+
+    fun loadScene(): Pair<String, List<dev.harness.coughtopause.core.ScriptLine>>? {
+        val id = prefs.getString(KEY_SCENE_ID, null) ?: return null
+        val lines = SceneCodec.decode(prefs.getString(KEY_SCENE_LINES, null)) ?: return null
+        return id to lines
+    }
+
     fun saveCalibration(result: CalibrationResult) {
         prefs.edit().putString(KEY_CALIBRATION, CalibrationCodec.encode(result)).apply()
     }
@@ -52,6 +67,8 @@ class SessionStore(context: Context) {
         const val KEY_SESSION = "session"
         const val KEY_SETTINGS = "settings"
         const val KEY_CALIBRATION = "calibration"
+        const val KEY_SCENE_ID = "scene_id"
+        const val KEY_SCENE_LINES = "scene_lines"
         const val KEY_FALSE_POSITIVES = "false_positives"
         const val KEY_MISSED = "missed_coughs"
     }

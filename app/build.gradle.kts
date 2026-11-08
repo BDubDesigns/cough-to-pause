@@ -53,6 +53,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-service:2.11.0")
 
+    implementation(project(":rpg"))
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
     testImplementation("junit:junit:4.13.2")
