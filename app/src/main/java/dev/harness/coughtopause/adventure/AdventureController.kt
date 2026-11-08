@@ -78,6 +78,32 @@ class AdventureController(private val context: Context) {
         }
     }
 
+    /** Back to character creation without touching the saves. */
+    fun startFresh() {
+        campaign = null
+        transcript.clear()
+        _state.update {
+            it.copy(snapshot = null, hasCampaign = false, busy = false, message = null, voice = VoiceState.Idle)
+        }
+    }
+
+    /** Deletes every saved campaign, then returns to character creation. */
+    fun deleteAllCampaigns() {
+        executor.execute {
+            val removed = engine.deleteAll()
+            campaign = null
+            transcript.clear()
+            _state.update {
+                it.copy(
+                    snapshot = null,
+                    hasCampaign = false,
+                    busy = false,
+                    message = "Deleted $removed saved campaign(s).",
+                )
+            }
+        }
+    }
+
     fun newAdventure(name: String, backgroundId: BackgroundId) {
         _state.update { it.copy(busy = true, message = null) }
         executor.execute {

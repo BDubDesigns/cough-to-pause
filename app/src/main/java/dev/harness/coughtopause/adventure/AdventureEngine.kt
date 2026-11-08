@@ -67,6 +67,7 @@ class AdventureEngine(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
 
+    private val directory = rootDir
     private val store = FileCampaignStore(rootDir)
     private val processor = ActionProcessor(store, clock = clock)
     private val factory = CharacterFactory()
@@ -99,6 +100,13 @@ class AdventureEngine(
     fun load(id: CampaignId): Campaign? = (processor.load(id) as? LoadResult.Loaded)?.campaign
 
     fun listCampaigns(): List<CampaignId> = store.list()
+
+    /** Deletes every saved campaign. Returns how many files were removed. */
+    fun deleteAll(): Int {
+        val files = directory.listFiles { file -> file.isFile && file.name.endsWith(".json") }
+            ?: return 0
+        return files.count { it.delete() }
+    }
 
     fun submit(id: CampaignId, command: GameCommand): Submission = processor.submit(id, command)
 

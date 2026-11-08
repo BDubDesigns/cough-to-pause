@@ -139,7 +139,12 @@ private fun HarnessApp() {
             onSpeak = { adventureController.startVoice() },
             onStopVoice = { adventureController.stopVoice() },
             onNarrateAgain = { adventureController.act("look") },
-            onBack = { screen = Screens.MAIN },
+            onNewAdventure = { adventureController.startFresh() },
+            onDeleteSaves = { adventureController.deleteAllCampaigns() },
+            onBack = {
+                NarrationService.enterHarness(context)
+                screen = Screens.MAIN
+            },
         )
 
         Screens.DIAGNOSTICS -> DiagnosticsScreen(
@@ -173,7 +178,15 @@ private fun HarnessApp() {
             onFalsePositive = { NarrationService.markFalsePositive(context) },
             onMissedCough = { NarrationService.markMissed(context) },
             onOpenDiagnostics = { screen = Screens.DIAGNOSTICS },
-            onOpenAdventure = { screen = Screens.ADVENTURE },
+            onOpenAdventure = {
+                // Drop the harness checkpoint so "Play" cannot resume the M0 test dialogue.
+                NarrationService.enterAdventure(context)
+                screen = Screens.ADVENTURE
+            },
+            onQuit = {
+                NarrationService.quit(context)
+                (context as? android.app.Activity)?.finish()
+            },
         )
     }
 }

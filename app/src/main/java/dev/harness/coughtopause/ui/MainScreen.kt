@@ -55,6 +55,7 @@ fun MainScreen(
     onMissedCough: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onOpenAdventure: () -> Unit,
+    onQuit: () -> Unit,
 ) {
     val narration = state.narration
     val status = narration.status
@@ -108,6 +109,10 @@ fun MainScreen(
         )
 
         MetricsCard(state, onFalsePositive, onMissedCough)
+
+        TextButton(onClick = onQuit, modifier = Modifier.fillMaxWidth()) {
+            Text("Quit — stop narration and the microphone")
+        }
 
         val error = state.error
         if (error != null) {

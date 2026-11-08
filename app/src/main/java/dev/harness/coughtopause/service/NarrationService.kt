@@ -88,6 +88,7 @@ class NarrationService : Service() {
     private val micExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "mic-policy")
     }
+    private var quitting = false
     private var lastPolicyStatus: PlaybackStatus? = null
     private var sliceActive = false
     private val micOwnership = MicOwnership()
@@ -170,7 +171,9 @@ class NarrationService : Service() {
         HarnessState.update {
             it.copy(serviceRunning = false, micStatus = "stopped", voiceStatus = VoiceStatus.OFF)
         }
-        store.saveSession(controller.exportSession(System.currentTimeMillis()))
+        if (!quitting) {
+            store.saveSession(controller.exportSession(System.currentTimeMillis()))
+        }
         super.onDestroy()
     }
 
@@ -451,6 +454,30 @@ class NarrationService : Service() {
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         when (val action = intent.action) {
+            ACTION_ENTER_ADVENTURE -> {
+                // Leaving the harness must not leave its checkpoint behind: otherwise "Play"
+                // resumes the M0 test dialogue while the player is in the adventure.
+                if (controller.snapshot().scriptId == NarrationScript.SCRIPT_ID) {
+                    execute(controller.stop(CommandSource.UI))
+                    HarnessState.log("mode: adventure (harness checkpoint cleared)")
+                } else {
+                    HarnessState.log("mode: adventure")
+                }
+            }
+            ACTION_ENTER_HARNESS -> {
+                if (controller.snapshot().scriptId != NarrationScript.SCRIPT_ID) {
+                    execute(controller.loadScript(NarrationScript.SCRIPT_ID, NarrationScript.LINES))
+                }
+                HarnessState.log("mode: harness")
+            }
+            ACTION_QUIT -> {
+                HarnessState.log("quit: stopping narration and service")
+                quitting = true
+                execute(controller.stop(CommandSource.UI))
+                store.clearSession()
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             ACTION_START_NARRATION -> {
                 // The harness button always narrates the harness script, even if an RPG scene
                 // was the last thing loaded.
@@ -824,6 +851,12 @@ class NarrationService : Service() {
             Intent(this, NarrationService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val quitIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, NarrationService::class.java).setAction(ACTION_QUIT),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val playing = snapshot.status == PlaybackStatus.PLAYING
         val paused = snapshot.status == PlaybackStatus.PAUSED
         val text = when {
@@ -841,6 +874,7 @@ class NarrationService : Service() {
             .setContentIntent(openApp)
             .addAction(0, if (paused) "Resume" else "Pause", toggleIntent)
             .addAction(0, "Stop", stopIntent)
+            .addAction(0, "Quit", quitIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
@@ -1010,6 +1044,9 @@ class NarrationService : Service() {
         const val ACTION_ENSURE_RUNNING = "dev.harness.coughtopause.ENSURE_RUNNING"
         const val ACTION_NARRATE_SCENE = "dev.harness.coughtopause.NARRATE_SCENE"
         const val ACTION_VOICE_WINDOW = "dev.harness.coughtopause.VOICE_WINDOW"
+        const val ACTION_ENTER_ADVENTURE = "dev.harness.coughtopause.ENTER_ADVENTURE"
+        const val ACTION_ENTER_HARNESS = "dev.harness.coughtopause.ENTER_HARNESS"
+        const val ACTION_QUIT = "dev.harness.coughtopause.QUIT"
         const val EXTRA_WINDOW_OPEN = "window_open"
         const val EXTRA_WINDOW_MS = "window_ms"
         const val EXTRA_SCENE_ID = "scene_id"
@@ -1029,6 +1066,14 @@ class NarrationService : Service() {
         }
 
         fun startNarration(context: Context) = send(context, ACTION_START_NARRATION)
+
+        /** Tell the service which experience is on screen, so checkpoints cannot cross over. */
+        fun enterAdventure(context: Context) = send(context, ACTION_ENTER_ADVENTURE)
+
+        fun enterHarness(context: Context) = send(context, ACTION_ENTER_HARNESS)
+
+        /** Stop narration, release the microphone and remove the notification. */
+        fun quit(context: Context) = send(context, ACTION_QUIT)
 
         /** Hand the microphone to an external one-shot recogniser for a bounded window. */
         fun openVoiceWindow(context: Context, durationMs: Int = 8_000) {

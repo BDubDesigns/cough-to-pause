@@ -44,6 +44,8 @@ fun AdventureScreen(
     onSpeak: () -> Unit,
     onStopVoice: () -> Unit,
     onNarrateAgain: () -> Unit,
+    onNewAdventure: () -> Unit,
+    onDeleteSaves: () -> Unit,
     onBack: () -> Unit,
 ) {
     val snapshot = adventure.snapshot
@@ -76,6 +78,10 @@ fun AdventureScreen(
             CharacterCreationCard(backgrounds, onBegin, onRestore, adventure.busy)
         } else {
             LocationCard(snapshot, harness)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onNewAdventure) { Text("New adventure") }
+                OutlinedButton(onClick = onDeleteSaves) { Text("Delete saves") }
+            }
             CharacterCard(snapshot)
             snapshot.lastRoll?.let { roll ->
                 Card(modifier = Modifier.fillMaxWidth()) {
