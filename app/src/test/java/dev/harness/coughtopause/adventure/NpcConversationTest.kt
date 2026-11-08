@@ -187,6 +187,36 @@ class NpcConversationTest {
     }
 
     @Test
+    fun rollHistoryIsCompleteAndNewestFirst() {
+        val engine = engine()
+        var world = campaign(engine)
+        // Three separate checks, each with its own action id.
+        repeat(3) { i ->
+            world = (engine.submit(
+                world.id,
+                GameCommand.AttemptCheck(
+                    ActionId("a-history-$i"),
+                    CheckRequest(
+                        skill = SkillCatalog.PERCEPTION,
+                        difficulty = DifficultyTier.MODERATE,
+                        challenge = ChallengeKey(world.currentLocationId.value, "history-$i"),
+                        intent = "look again $i",
+                        importance = RollImportance.IMPORTANT,
+                    ),
+                ),
+            ).let { engine.load(world.id) ?: world })
+        }
+        val snapshot = engine.snapshot(world, emptyList(), "test")
+        assertEquals("every roll must be in the history", 3, snapshot.rolls.size)
+        assertEquals("newest first", snapshot.rolls.first(), snapshot.lastRoll)
+        assertEquals(
+            "history must match the engine's roll log",
+            world.rolls.map { it.natural }.reversed(),
+            snapshot.rolls.map { it.natural },
+        )
+    }
+
+    @Test
     fun factsTheWorldAlreadySeedsCanStillBeSpoken() {
         val engine = engine()
         val world = campaign(engine)
