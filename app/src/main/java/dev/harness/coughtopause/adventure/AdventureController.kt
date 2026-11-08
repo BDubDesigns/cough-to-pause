@@ -91,6 +91,10 @@ class AdventureController(private val context: Context) {
     private var recognizer: SpeechRecognizer? = null
     private var voice: VoiceCapture? = null
 
+    /** True when the current capture came from the automatic window rather than a tap on Speak. */
+    @Volatile
+    private var autoCapture = false
+
     // ---------------------------------------------------------------- campaign lifecycle
 
     fun restore() {
@@ -451,8 +455,8 @@ class AdventureController(private val context: Context) {
             alreadyListening = voice?.isListening == true,
         )
         if (listen) {
-            _state.update { it.copy(message = "Listening — answer Andy, or ignore it.") }
-            startVoice()
+            _state.update { it.copy(message = "Listening — say \"Andy, …\" to answer, or ignore it.") }
+            startVoice(fromAutoWindow = true)
         }
     }
 
@@ -466,8 +470,9 @@ class AdventureController(private val context: Context) {
 
     // ---------------------------------------------------------------- voice input
 
-    fun startVoice() {
+    fun startVoice(fromAutoWindow: Boolean = false) {
         if (voice?.isListening == true) return
+        autoCapture = fromAutoWindow
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _state.update { it.copy(voice = VoiceState.Failed("no speech recogniser on this device")) }
             return
@@ -485,7 +490,16 @@ class AdventureController(private val context: Context) {
                     val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                     val next = capture.onResult(text)
                     _state.update { it.copy(voice = next) }
-                    if (next is VoiceState.Captured) act(next.text)
+                    if (next is VoiceState.Captured) {
+                        if (autoCapture && !WakePhrase.acceptsAutoCapture(next.text)) {
+                            // The window also hears the room; do not answer speech not aimed at Andy.
+                            _state.update {
+                                it.copy(message = "Heard \"${next.text.take(40)}\" — not addressed to Andy, ignored.")
+                            }
+                        } else {
+                            act(next.text)
+                        }
+                    }
                     stopVoice()
                     NarrationService.closeVoiceWindow(context)
                 }

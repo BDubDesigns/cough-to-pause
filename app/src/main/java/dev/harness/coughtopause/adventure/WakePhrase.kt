@@ -30,4 +30,13 @@ object WakePhrase {
         val stripped = strip(text)
         return if (stripped.isEmpty() && isAddressed(text)) "look" else stripped
     }
+
+    /**
+     * Should a phrase captured by the *automatic* window be acted on?
+     *
+     * The contextual window opens by itself after Andy speaks, so it also hears the room. Only
+     * speech that addresses Andy is treated as a command; tapping Speak is explicit consent and
+     * stays permissive.
+     */
+    fun acceptsAutoCapture(text: String): Boolean = isAddressed(text)
 }
