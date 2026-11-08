@@ -78,7 +78,7 @@ Rules are implemented in `MicOwnership` (pure, unit tested) and enforced by
 `NarrationService.applyOwner`. The window is bounded (8 s) and closes on result, error, timeout or
 an explicit stop, so the detector can never be left switched off.
 
-## Wake word: evaluate before training
+## Wake word: see [wake-word.md](wake-word.md)
 
 A wake word is **not** in this PR. Before proposing a custom model, evaluate off-the-shelf on-device
 engines:
