@@ -95,4 +95,12 @@ class MicOwnershipTest {
         mic.onPlaybackStatus(PlaybackStatus.PLAYING)
         assertEquals(MicOwner.DETECTOR, mic.closeAdventureWindow(PlaybackStatus.PLAYING))
     }
+
+    @Test
+    fun onlySpeechAddressingAndyIsActedOnFromTheAutoWindow() {
+        assertTrue(WakePhrase.acceptsAutoCapture("Andy, look around"))
+        assertTrue(WakePhrase.acceptsAutoCapture("hey andy go to the inn"))
+        assertFalse("room chatter must be ignored", WakePhrase.acceptsAutoCapture("did you see the music games"))
+        assertFalse(WakePhrase.acceptsAutoCapture("look around"))
+    }
 }
