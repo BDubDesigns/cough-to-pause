@@ -266,6 +266,33 @@ class NarrationControllerTest {
     }
 
     @Test
+    fun loadingASceneScriptReplacesTheHarnessScriptAndKeepsThePauseContract() {
+        val c = controller()
+        c.start()
+        c.onCough(0.8f, "DSP")
+
+        val scene = listOf(
+            ScriptLine("R01", 0, "Thornwick. A huddle of cottages."),
+            ScriptLine("R02", 1, "Here: Mira, the innkeeper."),
+        )
+        val actions = c.loadScript("rpg-c-test-2", scene)
+        assertTrue("loading a scene must stop current speech", actions.stopped())
+        assertEquals(PlaybackStatus.IDLE, c.snapshot().status)
+        assertNull("a new script starts without a checkpoint", c.snapshot().checkpoint)
+        assertEquals("rpg-c-test-2", c.snapshot().scriptId)
+
+        val started = c.start()
+        assertEquals("R01", started.speaks().single().lineId)
+
+        // The same cough → checkpoint → resume-lines contract applies to RPG narration.
+        c.onCough(0.9f, "HYBRID")
+        assertEquals("R01", c.snapshot().checkpoint?.lineId)
+        val resumed = c.resume(CommandSource.VOICE, "play")
+        assertEquals("R01", resumed.speaks().single().lineId)
+        assertTrue(resumed.speaks().single().restart)
+    }
+
+    @Test
     fun generationIncreasesForEveryUtterance() {
         val c = controller()
         c.start()

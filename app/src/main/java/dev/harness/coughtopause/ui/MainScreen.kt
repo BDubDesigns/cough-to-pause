@@ -54,6 +54,7 @@ fun MainScreen(
     onFalsePositive: () -> Unit,
     onMissedCough: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenAdventure: () -> Unit,
 ) {
     val narration = state.narration
     val status = narration.status
@@ -91,6 +92,9 @@ fun MainScreen(
             OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.weight(1f)) {
                 Text("Diagnostics")
             }
+        }
+        Button(onClick = onOpenAdventure, modifier = Modifier.fillMaxWidth()) {
+            Text("Adventure →")
         }
 
         DetectorCard(state, onBackendChange, onVoiceSlicesChange)

@@ -40,7 +40,9 @@ import dev.harness.coughtopause.core.DspResult
 import dev.harness.coughtopause.core.GateResult
 import dev.harness.coughtopause.core.NarrationAction
 import dev.harness.coughtopause.core.NarrationController
+import dev.harness.coughtopause.core.NarrationScript
 import dev.harness.coughtopause.core.NarrationSnapshot
+import dev.harness.coughtopause.core.ScriptLine
 import dev.harness.coughtopause.core.PauseReason
 import dev.harness.coughtopause.core.PlaybackStatus
 import dev.harness.coughtopause.core.VoiceCommand
@@ -113,7 +115,16 @@ class NarrationService : Service() {
             )
         }
 
-        val restored = controller.restore(store.loadSession())
+        val persisted = store.loadSession()
+        // A checkpoint from an RPG scene needs that scene's lines back before it can be restored.
+        if (persisted != null && persisted.scriptId != NarrationScript.SCRIPT_ID) {
+            val scene = store.loadScene()
+            if (scene != null && scene.first == persisted.scriptId) {
+                controller.loadScript(scene.first, scene.second)
+                HarnessState.log("scene restored: ${scene.first} (${scene.second.size} lines)")
+            }
+        }
+        val restored = controller.restore(persisted)
         if (restored.isNotEmpty()) {
             HarnessState.log("session restored: ${controller.snapshot().status} line=${controller.snapshot().currentLineId}")
         }
@@ -407,7 +418,29 @@ class NarrationService : Service() {
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         when (val action = intent.action) {
-            ACTION_START_NARRATION -> execute(controller.start(CommandSource.UI))
+            ACTION_START_NARRATION -> {
+                // The harness button always narrates the harness script, even if an RPG scene
+                // was the last thing loaded.
+                if (controller.snapshot().scriptId != NarrationScript.SCRIPT_ID) {
+                    execute(controller.loadScript(NarrationScript.SCRIPT_ID, NarrationScript.LINES))
+                }
+                execute(controller.start(CommandSource.UI))
+            }
+            ACTION_NARRATE_SCENE -> {
+                val sceneId = intent.getStringExtra(EXTRA_SCENE_ID) ?: "scene"
+                val texts = intent.getStringArrayListExtra(EXTRA_LINES).orEmpty()
+                if (texts.isEmpty()) {
+                    HarnessState.log("rpg: empty scene ignored")
+                } else {
+                    val lines = texts.mapIndexed { i, text ->
+                        ScriptLine("R%02d".format(i + 1), i, text)
+                    }
+                    store.saveScene(sceneId, lines)
+                    execute(controller.loadScript(sceneId, lines))
+                    execute(controller.start(CommandSource.SYSTEM))
+                    HarnessState.log("rpg: narrating $sceneId (${lines.size} lines)")
+                }
+            }
             ACTION_RESUME -> execute(controller.resume(CommandSource.UI))
             ACTION_PAUSE -> execute(controller.pause(CommandSource.UI))
             ACTION_STOP -> execute(controller.stop(CommandSource.UI))
@@ -935,6 +968,9 @@ class NarrationService : Service() {
         const val ACTION_RESET_METRICS = "dev.harness.coughtopause.RESET_METRICS"
         const val ACTION_REFRESH_ROUTE = "dev.harness.coughtopause.REFRESH_ROUTE"
         const val ACTION_ENSURE_RUNNING = "dev.harness.coughtopause.ENSURE_RUNNING"
+        const val ACTION_NARRATE_SCENE = "dev.harness.coughtopause.NARRATE_SCENE"
+        const val EXTRA_SCENE_ID = "scene_id"
+        const val EXTRA_LINES = "scene_lines"
 
         const val EXTRA_PHASE = "phase"
         const val EXTRA_DURATION_MS = "duration_ms"
@@ -950,6 +986,14 @@ class NarrationService : Service() {
         }
 
         fun startNarration(context: Context) = send(context, ACTION_START_NARRATION)
+
+        /** Narrate an RPG scene through the same checkpoint engine as the harness script. */
+        fun narrateScene(context: Context, sceneId: String, lines: List<String>) {
+            val intent = Intent(context, NarrationService::class.java).setAction(ACTION_NARRATE_SCENE)
+            intent.putExtra(EXTRA_SCENE_ID, sceneId)
+            intent.putStringArrayListExtra(EXTRA_LINES, ArrayList(lines))
+            ContextCompat.startForegroundService(context, intent)
+        }
         fun resume(context: Context) = send(context, ACTION_RESUME)
         fun pause(context: Context) = send(context, ACTION_PAUSE)
         fun stopNarration(context: Context) = send(context, ACTION_STOP)

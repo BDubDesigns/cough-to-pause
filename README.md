@@ -47,6 +47,15 @@ threshold that keeps the false-positive rate at or below 10 %.
 
 No microphone audio is written to disk or sent anywhere; one ring buffer is recycled in memory.
 
+## Adventure (M1, first playable slice)
+
+`Adventure →` in the app opens a small playable loop on top of the deterministic `:rpg` engine:
+create a character, arrive in the validated fallback world, `look` / `go to …` / `talk to …` /
+`search` / `persuade …`, see the roll and the skill XP, and hear it narrated through the same
+cough-to-pause pipeline. Text input and one-shot voice input both work. Narration is
+**scripted**, not AI — see [`docs/adventure.md`](docs/adventure.md) for what is simulated and what
+configuration a real dungeon master would need.
+
 ## Build (on the phone, no PC)
 
 Requires the toolchain from `android_sdk_install`: OpenJDK 21, `aapt2` (aarch64), Gradle.

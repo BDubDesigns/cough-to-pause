@@ -111,10 +111,13 @@ data class PersistedSession(
  *  - Line callbacks carrying a stale generation are ignored (they belong to an aborted utterance).
  */
 class NarrationController(
-    private val script: List<ScriptLine> = NarrationScript.LINES,
-    private val scriptId: String = NarrationScript.SCRIPT_ID,
+    script: List<ScriptLine> = NarrationScript.LINES,
+    scriptId: String = NarrationScript.SCRIPT_ID,
     private val now: () -> Long = SystemClockLike::elapsed,
 ) {
+
+    private var script: List<ScriptLine> = script
+    private var scriptId: String = scriptId
 
     private var status: PlaybackStatus = PlaybackStatus.IDLE
     private var currentLineIndex: Int = -1
@@ -122,6 +125,23 @@ class NarrationController(
     private var generation: Long = 0
     private var counters: Counters = Counters()
     private var lastEvent: LastEvent? = null
+
+    /**
+     * Swap the narration source (the M0 harness script, or an RPG scene) without changing the
+     * pause/resume contract: the checkpoint is cleared and the next [start] speaks line 0.
+     */
+    fun loadScript(newScriptId: String, lines: List<ScriptLine>): List<NarrationAction> {
+        val actions = mutableListOf<NarrationAction>()
+        actions += NarrationAction.StopSpeech
+        script = lines
+        scriptId = newScriptId
+        status = PlaybackStatus.IDLE
+        currentLineIndex = -1
+        checkpoint = null
+        generation += 1
+        lastEvent = LastEvent("script-loaded", "id=$newScriptId lines=${lines.size}", now())
+        return commit(actions)
+    }
 
     fun snapshot(): NarrationSnapshot = NarrationSnapshot(
         scriptId = scriptId,
