@@ -46,6 +46,7 @@ fun MainScreen(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onBackendChange: (DetectorBackend, Float) -> Unit,
+    onVoiceSlicesChange: (Boolean) -> Unit,
     onCalibrateCough: () -> Unit,
     onCalibrateBackground: () -> Unit,
     onApplyCalibration: () -> Unit,
@@ -92,7 +93,7 @@ fun MainScreen(
             }
         }
 
-        DetectorCard(state, onBackendChange)
+        DetectorCard(state, onBackendChange, onVoiceSlicesChange)
 
         CalibrationCard(
             state = state,
@@ -159,7 +160,11 @@ private fun StatusCard(state: UiState) {
 }
 
 @Composable
-private fun DetectorCard(state: UiState, onBackendChange: (DetectorBackend, Float) -> Unit) {
+private fun DetectorCard(
+    state: UiState,
+    onBackendChange: (DetectorBackend, Float) -> Unit,
+    onVoiceSlicesChange: (Boolean) -> Unit,
+) {
     var sensitivity by remember { mutableFloatStateOf(state.settings.sensitivity) }
     var backend by remember { mutableStateOf(state.settings.backend) }
     var dirty by remember { mutableStateOf(false) }
@@ -215,13 +220,31 @@ private fun DetectorCard(state: UiState, onBackendChange: (DetectorBackend, Floa
                     },
                     enabled = dirty,
                 ) { Text("Apply") }
+
+                // Checkbox rather than a switch: it is an explicit trade, not a preference.
+                androidx.compose.material3.Checkbox(
+                    checked = state.settings.voiceSlicesWhilePlaying,
+                    onCheckedChange = onVoiceSlicesChange,
+                )
                 Text(
-                    state.modelStatus,
-                    style = TelemetryStyle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "Voice while narrating",
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.align(Alignment.CenterVertically),
                 )
             }
+            if (state.settings.voiceSlicesWhilePlaying) {
+                Text(
+                    "Detection is off for 1.5 s of every 6 s while narrating, so a spoken \"Pause\" works. " +
+                        "Turn this off for maximum cough detection.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Text(
+                state.modelStatus,
+                style = TelemetryStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

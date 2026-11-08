@@ -70,7 +70,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk   # or: pm install -r -
 ```
 
 Grant microphone (and notification) permission, then `Start`. Diagnostics live in the second screen:
-last event and confidence, latency stats, audio route and AEC state, precision/recall, battery.
+last event and confidence, latency stats, audio route and AEC state, precision/recall, battery,
+capture health (analysed windows, silent reads, peak level, screen state) and a **Near misses** table
+that records every window which came within 55 % of the threshold — so a cough that failed to pause
+leaves evidence of *why* it failed.
 
 ## Layout
 
@@ -94,8 +97,14 @@ docs/          playtest protocol, measurements, detector recommendation
 
 - **Single-capture arbitration.** Android gives capture to one client at a time: with the app's own
   `AudioRecord` running, the platform recogniser never receives audio. While **paused** the
-  recogniser owns the mic; while **playing** the detector owns it, with a 1.5 s recognition slice
-  every 6 s. A spoken "Pause" can therefore take up to ~6 s, and each slice is a detection gap.
+  recogniser owns the mic, so "Play"/"Resume" is immediate. While **playing** the detector owns it
+  continuously, which is the default because every recognition slice is a window in which a cough
+  cannot be heard. Ticking *Voice while narrating* restores a 1.5 s slice every 6 s, at the cost of
+  that blind spot.
+- **Another device's speaker is not cancellable.** Playing narration through a car stereo or a
+  speaker the phone does not own means the phone mic hears full-level speech; the local echo
+  canceller has no reference for it and YAMNet classifies it as speech, so a distant cough has to
+  win against it. Earbuds (narration inside the ears, mic hearing only the room) are the clean case.
 - **Speaker self-trigger.** Narrating through the phone speaker produced a false positive
   (score 0.59, YAMNet-confirmed). AEC was active; this is the strongest argument for earbuds.
 - **DSP is a heuristic.** Fricatives and throat-clearing can score like a cough. Calibration helps;

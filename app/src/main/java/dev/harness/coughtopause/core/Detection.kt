@@ -30,12 +30,22 @@ data class DetectorSettings(
     val minSnrDb: Float = 9f,
     val confirmationWindows: Int = 1,
     val calibrateGain: Float = 0f,
+    /**
+     * While narrating, hand the microphone to the recogniser for a short slice so a spoken
+     * "Pause" is possible. Off by default: Android grants capture to one client at a time, so
+     * every slice is a window in which a cough cannot be detected.
+     */
+    val voiceSlicesWhilePlaying: Boolean = false,
 ) {
     fun effectiveDspThreshold(): Float {
         // sensitivity 0 -> 1.25x base (stricter), sensitivity 1 -> 0.75x base (looser)
         val scaled = dspThreshold * (1.25f - 0.5f * sensitivity.coerceIn(0f, 1f))
         return (scaled - calibrateGain).coerceIn(0.05f, 0.99f)
     }
+
+    /** Milliseconds of every cycle in which the detector is not listening. */
+    val detectorGapFraction: Float
+        get() = if (voiceSlicesWhilePlaying) 0.25f else 0f
 
     fun effectiveYamnetThreshold(): Float {
         val scaled = yamnetThreshold * (1.35f - 0.7f * sensitivity.coerceIn(0f, 1f))

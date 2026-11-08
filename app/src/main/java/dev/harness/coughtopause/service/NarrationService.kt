@@ -86,6 +86,8 @@ class NarrationService : Service() {
     }
     private var lastPolicyStatus: PlaybackStatus? = null
     private var sliceActive = false
+    private var lastWatchdogWindows: Long = -1
+    private var lastWatchdogEngine: CoughAudioEngine? = null
 
     private val calibration = CalibrationSession()
 
@@ -136,6 +138,7 @@ class NarrationService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        runCatching { unregisterReceiver(screenReceiver) }
         runCatching { micExecutor.shutdownNow() }
         audio?.stop()
         audio = null
@@ -188,6 +191,8 @@ class NarrationService : Service() {
         requestFocus()
         scheduleBatterySample()
         refreshRoute()
+        registerScreenReceiver()
+        handler.postDelayed(captureWatchdog, 10_000)
         HarnessState.log(
             "voice: on-device recogniser=${SpeechRecognizer.isOnDeviceRecognitionAvailable(this)} " +
                 "sdk=${Build.VERSION.SDK_INT}",
@@ -212,7 +217,15 @@ class NarrationService : Service() {
                 HarnessState.log("cooldown: suppressed detection (%.0f ms)".format(result.suppressedForMs))
             }
         },
+        onCapture = { line ->
+            HarnessState.update {
+                it.copy(capture = line, captureWindows = captureWindowsSeen)
+            }
+        },
     )
+
+    @Volatile
+    private var captureWindowsSeen: Long = 0L
 
     private fun setDetectorWanted(wanted: Boolean) {
         if (wanted) {
@@ -282,14 +295,19 @@ class NarrationService : Service() {
                     setVoiceWanted(false)
                     setDetectorWanted(true)
                 }
-                handler.postDelayed(voiceSliceRunnable, voiceSliceEveryMs)
+                if (settings.voiceSlicesWhilePlaying) {
+                    handler.postDelayed(voiceSliceRunnable, voiceSliceEveryMs)
+                }
             }
             else -> micExecutor.execute {
                 setVoiceWanted(false)
                 setDetectorWanted(true)
             }
         }
-        HarnessState.log("mic policy: $status → ${if (status == PlaybackStatus.PAUSED) "recogniser" else "detector"}")
+        HarnessState.log(
+            "mic policy: $status → ${if (status == PlaybackStatus.PAUSED) "recogniser" else "detector"}" +
+                if (settings.voiceSlicesWhilePlaying) " (voice slices on)" else " (continuous detection)",
+        )
     }
 
     private val voiceSliceRunnable = Runnable { startVoiceSlice() }
@@ -398,7 +416,11 @@ class NarrationService : Service() {
                 settings = store.loadSettings()
                 audio?.resetGate()
                 HarnessState.update { it.copy(settings = settings) }
-                HarnessState.log("settings reloaded: ${settings.backend} sens=${settings.sensitivity}")
+                applyMicPolicy(controller.snapshot().status)
+                HarnessState.log(
+                    "settings reloaded: ${settings.backend} sens=${settings.sensitivity} " +
+                        "voiceSlices=${settings.voiceSlicesWhilePlaying}",
+                )
             }
             ACTION_CALIBRATE_PHASE -> {
                 val phase = intent.getStringExtra(EXTRA_PHASE) ?: "cough"
@@ -425,7 +447,9 @@ class NarrationService : Service() {
             }
             ACTION_RESET_METRICS -> {
                 metrics.reset()
+                audio?.resetPeaks()
                 store.saveOperatorCounters(0, 0)
+                HarnessState.update { it.copy(nearMisses = emptyList()) }
                 HarnessState.update { it.copy(metrics = metrics.snapshot()) }
                 HarnessState.log("metrics reset")
             }
@@ -810,6 +834,66 @@ class NarrationService : Service() {
     private fun releaseWakeLock() {
         runCatching { wakeLock?.release() }
         wakeLock = null
+    }
+
+    private fun registerScreenReceiver() {
+        val pm = getSystemService(PowerManager::class.java)
+        HarnessState.update { it.copy(screenOn = pm?.isInteractive ?: true) }
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val on = intent.action == Intent.ACTION_SCREEN_ON
+            HarnessState.update { it.copy(screenOn = on) }
+            HarnessState.log(
+                "screen ${if (on) "ON" else "OFF"} · analysed windows=$captureWindowsSeen" +
+                    (audio?.let { " · silent reads=${it.zeroReads}" } ?: " · detector not owning mic"),
+            )
+        }
+    }
+
+    /**
+     * Capture watchdog. A foreground service with the microphone type is allowed to record with
+     * the screen off, but if the platform or an OEM policy silences the input, AudioRecord keeps
+     * returning zeroed buffers instead of failing. Bumping the microphone back to life is the
+     * difference between "the detector missed it" and "nothing was ever recorded".
+     */
+    private val captureWatchdog = object : Runnable {
+        override fun run() {
+            val engine = audio
+            if (engine != null) {
+                if (engine !== lastWatchdogEngine) {
+                    lastWatchdogEngine = engine
+                    lastWatchdogWindows = -1
+                }
+                val windows = engine.windowsAnalysed
+                captureWindowsSeen = windows
+                if (windows == lastWatchdogWindows) {
+                    HarnessState.log(
+                        "capture stalled: no analysis window in 10 s (silent reads=${engine.zeroReads}, " +
+                            "read errors=${engine.readErrors}) — restarting microphone",
+                    )
+                    micExecutor.execute {
+                        setDetectorWanted(false)
+                        setDetectorWanted(true)
+                    }
+                }
+                lastWatchdogWindows = windows
+                val nearMisses = engine.nearMissSnapshot()
+                HarnessState.update { it.copy(nearMisses = nearMisses) }
+                HarnessState.log(
+                    "capture: windows=$windows · silent reads=${engine.zeroReads} · errs=${engine.readErrors} · " +
+                        "peak %.0f dB · screen=${if (HarnessState.state.value.screenOn) "on" else "off"}"
+                            .format(engine.lastPeakDb),
+                )
+            }
+            handler.postDelayed(this, 10_000)
+        }
     }
 
     private fun scheduleBatterySample() {

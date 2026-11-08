@@ -124,6 +124,9 @@ fun DiagnosticsScreen(
                 SectionRow("cooldown", "${state.settings.cooldownMs} ms")
                 SectionRow("window / hop", "${state.settings.windowMs} / ${state.settings.hopMs} ms")
                 SectionRow("microphone", state.micStatus)
+                SectionRow("screen", if (state.screenOn) "on" else "off")
+                SectionRow("voice slices", if (state.settings.voiceSlicesWhilePlaying) "on (detection gap)" else "off")
+                SectionRow("capture", state.capture)
                 SectionRow("model", state.modelStatus)
                 SectionRow("voice", state.voiceStatus.name)
                 state.voiceLastHeard?.let { SectionRow("last phrase", it) }
@@ -167,6 +170,22 @@ fun DiagnosticsScreen(
                     if (!b.batteryPctPerHour.isNaN()) "%.1f %%/h".format(Locale.US, b.batteryPctPerHour) else "—",
                 )
                 SectionRow("note", b.note)
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Near misses", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Windows that came close to the threshold. A cough that did not pause the " +
+                        "narration appears here with the reason it was rejected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.nearMisses.isEmpty()) {
+                    Text("nothing close to the threshold yet", style = TelemetryStyle)
+                }
+                state.nearMisses.take(12).forEach { line -> Text(line, style = TelemetryStyle) }
             }
         }
 

@@ -114,7 +114,6 @@ class CommandListener(
         if (text.isNullOrBlank()) return
         HarnessState.update { it.copy(voiceLastHeard = text) }
         val command = VoiceCommands.parse(text) ?: return
-        restartDelayMs = 350L
         onCommand(command, text)
     }
 

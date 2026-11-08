@@ -36,7 +36,57 @@ class CoughAudioEngine(
     private val onDetection: (DetectionEvent) -> Unit,
     private val onAnalysis: (DspResult, Float, Boolean) -> Unit,
     private val onGateRejected: (GateResult) -> Unit,
+    private val onCapture: (String) -> Unit = {},
 ) {
+
+    /**
+     * Capture health.
+     *
+     * If Android (or a pocket/proximity policy) silences the microphone, AudioRecord keeps
+     * returning buffers — they are just all zero. Counting those, and counting windows that were
+     * actually analysed, is the difference between "the detector missed a cough" and "the
+     * microphone was never delivering audio".
+     */
+    @Volatile
+    var windowsAnalysed: Long = 0
+        private set
+
+    @Volatile
+    var zeroReads: Long = 0
+        private set
+
+    @Volatile
+    var readErrors: Long = 0
+        private set
+
+    @Volatile
+    var lastReadAtMs: Long = 0
+        private set
+
+    @Volatile
+    var lastPeakDb: Float = -120f
+        private set
+
+    /** Highest scores seen since the last reset — proves whether a sound was even analysed. */
+    @Volatile
+    var maxDspScore: Float = 0f
+        private set
+
+    @Volatile
+    var maxYamnetScore: Float = 0f
+        private set
+
+    private val nearMisses = java.util.Collections.synchronizedList(ArrayList<String>())
+    private var lastNearMissAt = 0L
+
+    /** Recent windows that came close to the threshold, newest first. Evidence, not a guess. */
+    fun nearMissSnapshot(): List<String> = synchronized(nearMisses) { nearMisses.toList() }
+
+    fun resetPeaks() {
+        maxDspScore = 0f
+        maxYamnetScore = 0f
+        synchronized(nearMisses) { nearMisses.clear() }
+    }
 
     private val scorer = DspCoughScorer(SAMPLE_RATE)
     private val floor = NoiseFloorTracker()
@@ -75,6 +125,7 @@ class CoughAudioEngine(
         private set
 
     private var lastModelReportMs = 0L
+    private var lastCaptureReportMs = 0L
 
     private val ring = FloatArray(YAMNET_WINDOW)
     private var ringPos = 0
@@ -182,13 +233,21 @@ class CoughAudioEngine(
             while (running) {
                 val read = rec.read(chunk, 0, chunk.size)
                 if (read <= 0) {
+                    readErrors++
                     if (read < 0) {
                         onStatus("microphone read error $read")
                         break
                     }
                     continue
                 }
-                for (i in 0 until read) floats[i] = chunk[i] / 32768f
+                lastReadAtMs = SystemClock.elapsedRealtime()
+                var nonZero = false
+                for (i in 0 until read) {
+                    val v = chunk[i]
+                    if (v.toInt() != 0) nonZero = true
+                    floats[i] = v / 32768f
+                }
+                if (!nonZero) zeroReads++
                 push(floats, read)
                 samplesSinceAnalysis += read
                 val hop = settingsProvider().hopMs.coerceIn(120, 900) * SAMPLE_RATE / 1000
@@ -231,6 +290,8 @@ class CoughAudioEngine(
         val dsp = scorer.analyze(window, floor.floorDb)
         floor.update(rmsDb(window))
         lastDspScore = dsp.score
+        lastPeakDb = dsp.peakDb
+        windowsAnalysed++
 
         val yamnetResult = yamnet?.let { if (it.loaded) it.classify(tail(it.inputSampleCount)) else null }
         lastYamnetScore = yamnetResult?.combined ?: 0f
@@ -269,10 +330,37 @@ class CoughAudioEngine(
         val silent = dsp.peakDb < settings.minPeakDb || dsp.snrDb < settings.minSnrDb
         val gated = if (silent) 0f else score
         val timestamp = SystemClock.elapsedRealtime()
-        val result = gate.offer(gated, timestamp, threshold)
 
+        if (dsp.score > maxDspScore) maxDspScore = dsp.score
+        if (lastYamnetScore > maxYamnetScore) maxYamnetScore = lastYamnetScore
+        // Keep the loudest handful of near misses: after a failed pocket session these say
+        // exactly how far below the threshold the coughs landed, and on which feature.
+        val result = gate.offer(gated, timestamp, threshold)
         val accepted = result is GateResult.Accepted
+
+        if (!silent && dsp.score >= threshold * 0.55f && timestamp - lastNearMissAt > 250) {
+            lastNearMissAt = timestamp
+            val verdict = if (accepted) "ACCEPTED" else "below"
+            synchronized(nearMisses) {
+                nearMisses.add(
+                    0,
+                    "%tH:%<tM:%<tS dsp %.2f yam %.2f thr %.2f · %.0f dB · snr %.0f · onset %.0f ms · high %.2f · flat %.2f · %s"
+                        .format(
+                            java.util.Date(), dsp.score, lastYamnetScore, threshold,
+                            dsp.peakDb, dsp.snrDb, dsp.onsetMs, dsp.highBandRatio, dsp.flatness, verdict,
+                        ),
+                )
+                while (nearMisses.size > 30) nearMisses.removeAt(nearMisses.size - 1)
+            }
+        }
         onAnalysis(dsp, lastYamnetScore, accepted)
+        if (timestamp - lastCaptureReportMs > 2_000) {
+            lastCaptureReportMs = timestamp
+            onCapture(
+                "windows $windowsAnalysed · peak %.0f dB · floor %.0f dB · dsp %.2f · yamnet %.2f · max dsp %.2f / yam %.2f · silent reads $zeroReads · errs $readErrors"
+                    .format(dsp.peakDb, floor.floorDb, dsp.score, lastYamnetScore, maxDspScore, maxYamnetScore),
+            )
+        }
         when (result) {
             is GateResult.Accepted -> {
                 val detail = buildString {

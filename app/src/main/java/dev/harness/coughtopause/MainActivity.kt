@@ -135,6 +135,10 @@ private fun HarnessApp() {
                 store.saveSettings(updated)
                 NarrationService.reloadSettings(context)
             },
+            onVoiceSlicesChange = { enabled ->
+                store.saveSettings(state.settings.copy(voiceSlicesWhilePlaying = enabled))
+                NarrationService.reloadSettings(context)
+            },
             onCalibrateCough = { NarrationService.calibrate(context, "cough", 5000) },
             onCalibrateBackground = { NarrationService.calibrate(context, "background", 5000) },
             onApplyCalibration = { NarrationService.applyCalibration(context) },

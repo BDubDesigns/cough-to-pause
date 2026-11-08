@@ -81,6 +81,7 @@ object SettingsCodec {
         put("minSnrDb", s.minSnrDb)
         put("confirmationWindows", s.confirmationWindows)
         put("calibrateGain", s.calibrateGain)
+        put("voiceSlicesWhilePlaying", s.voiceSlicesWhilePlaying)
     }.toString()
 
     fun decode(json: String?): DetectorSettings? {
@@ -100,6 +101,7 @@ object SettingsCodec {
                 minSnrDb = o.optDouble("minSnrDb", 9.0).toFloat(),
                 confirmationWindows = o.optInt("confirmationWindows", 1),
                 calibrateGain = o.optDouble("calibrateGain", 0.0).toFloat(),
+                voiceSlicesWhilePlaying = o.optBoolean("voiceSlicesWhilePlaying", false),
             )
         } catch (e: Exception) {
             null

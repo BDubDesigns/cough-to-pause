@@ -49,6 +49,16 @@ The playtest protocol collects 20+ per configuration.
 | Command latency | *pending measurement* (bounded by the recognition window and, while playing, the 1.5 s slice) |
 | Failure found in playtest #1 | recogniser never became ready — it was constructed on the mic worker thread (no `Looper`). Fixed; after the fix the log shows `voice: ready for speech` and "Play" resumes the interrupted line. |
 
+## Findings that changed the build
+
+| Symptom | Root cause (verified) | Fix |
+| --- | --- | --- |
+| "Play"/"Resume" never worked | `SpeechRecognizer` constructed on the mic worker thread, which has no `Looper`; the recogniser silently never opened | construct and drive it on the main looper; logcat now shows `voice: ready for speech` |
+| Coughs detected "sometimes" | 1.5 s recognition slice out of every 6 s while narrating — a 25 % blind spot | detector now owns the microphone continuously while narrating; slices are an opt-in checkbox |
+| Screen-off appeared to disable detection | confounded with the car-stereo session; capture itself was alive | capture watchdog + `capture:` counters (windows, silent reads, peak dB) prove whether audio is flowing |
+| Coughs "randomly" missed | no evidence of what the detector scored on a rejected window | near-miss table: dsp, yamnet, threshold, dB, SNR, onset, high-band, verdict |
+| Build failed at random with a cache error | Gradle build cache on the fuse shared-storage filesystem corrupts entries | `org.gradle.caching=false` |
+
 ## Automated tests
 
 `./scripts/build.sh :app:testDebugUnitTest` — **52 tests, 0 failures, 0 errors**:
@@ -71,6 +81,8 @@ tables above are for.
 | # | Config | Round | Result |
 | --- | --- | --- | --- |
 | 1 | Phone speaker, phone mic, screen on | informal, operator | Cough pauses narration immediately (operator: "coughing pauses it instantly"). Voice "play"/"resume" failed → root-caused to the recogniser thread bug, fixed and re-verified on device. No instrumented counts taken. |
+| 1b | Car stereo output, phone mic, screen off | informal, operator | Cough detection intermittent. Diagnosed as source competition, not a power policy: the phone mic captures full-level narration from a device the local AEC cannot reference, YAMNet classifies it as speech, and the hybrid gate rejects the distant cough. Matches the observed "occasionally works after coughing for a while" (coughs landing in the inter-line gap). |
+| 1c | Same device, continuous-detection build, screen off | informal, operator | Operator report: "working great now even with the screen off" after the recognition slices stopped taking the microphone. Not instrumented — counts still needed for rounds 2–9. |
 | 2 | Phone speaker, phone mic, screen on | instrumented 20-cough round | *pending* |
 | 3 | Bluetooth earbuds (A2DP) + phone mic | 20 coughs | *pending* |
 | 4 | Bluetooth earbuds, earbud mic (SCO/BLE) | 20 coughs + recalibration | *pending* |

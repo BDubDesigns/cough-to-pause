@@ -63,8 +63,12 @@ class PersistenceTest {
             dspThreshold = 0.61f,
             yamnetThreshold = 0.28f,
             cooldownMs = 900,
+            voiceSlicesWhilePlaying = true,
         )
         assertEquals(settings, SettingsCodec.decode(SettingsCodec.encode(settings)))
+        // The microphone handover is a real detection gap and must be visible as one.
+        assertEquals(0.25f, settings.detectorGapFraction, 0.001f)
+        assertEquals(0f, settings.copy(voiceSlicesWhilePlaying = false).detectorGapFraction, 0.001f)
 
         val calibration = CalibrationResult(0.62f, 12, 9, 0.92f, 0.03f, 0.21f, 99L)
         assertEquals(calibration, CalibrationCodec.decode(CalibrationCodec.encode(calibration)))
