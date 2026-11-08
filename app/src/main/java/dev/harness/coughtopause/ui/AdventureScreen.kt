@@ -48,6 +48,7 @@ fun AdventureScreen(
     onDeleteSaves: () -> Unit,
     onSaveAi: (String, String, String) -> Unit,
     onTestAi: () -> Unit,
+    onAutoListenChange: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     val snapshot = adventure.snapshot
@@ -102,6 +103,7 @@ fun AdventureScreen(
                 }
             }
             ActionCard(adventure, onAct, onSpeak, onStopVoice, onNarrateAgain)
+            AutoListenCard(adventure.autoListen, onAutoListenChange)
             TranscriptCard(snapshot)
         }
 
@@ -250,6 +252,29 @@ private fun ActionCard(
                     VoiceState.TimedOut -> "voice: timed out — type instead"
                 },
                 style = TelemetryStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutoListenCard(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(checked = enabled, onCheckedChange = onChange)
+                Text("Listen after Andy finishes", style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                if (enabled) {
+                    "When Andy finishes a scene the microphone is handed to speech recognition for a " +
+                        "few seconds, so you can answer without tapping. Silence does nothing and the " +
+                        "cough detector returns immediately."
+                } else {
+                    "Off: cough detection stays on continuously and you tap Speak to answer."
+                },
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

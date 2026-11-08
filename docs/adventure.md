@@ -53,15 +53,17 @@ address. Nothing listens for the name in the background in this slice.
 
 The intended loop, recorded so the next slice does not invent a different one:
 
-1. Andy finishes a narration prompt; the app opens a **short contextual response window**.
+1. Andy finishes a narration prompt; the app opens a **short contextual response window**
+   (implemented: `AutoListenPolicy`, ~8 s, silence does nothing).
 2. During the window, speech recognition owns the microphone and the detector is off.
 3. Silence or window timeout does nothing: no action, no error, and the detector comes back.
 4. A recognised utterance becomes the player's action, exactly as if typed.
 5. Outside contextual windows, **"Hey Andy"** will activate the window (wake word).
 6. Meanwhile cough detection is unchanged: a cough pauses narration, "Play" resumes that line.
 
-This PR implements the **handoff primitive** that loop needs — `MicOwnership` plus the service's
-bounded voice window — but the window is opened by tapping Speak, not automatically.
+Step 1 is implemented: the window opens by itself when a scene finishes, closes on silence, and
+returns the microphone to the detector (verified on the Pixel). Steps 4 and 5 — "Hey Andy" as the
+activator — are still to come.
 
 ### Microphone ownership
 

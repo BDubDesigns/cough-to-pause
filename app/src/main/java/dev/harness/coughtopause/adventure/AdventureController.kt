@@ -47,6 +47,7 @@ data class AdventureUiState(
     val aiModel: String = AiConfig.DEFAULT_MODEL,
     val aiKeyPresent: Boolean = false,
     val aiLastError: String? = null,
+    val autoListen: Boolean = true,
 )
 
 /**
@@ -63,6 +64,13 @@ class AdventureController(private val context: Context) {
     private var narrator: NarrativeProvider = buildNarrator(aiConfig)
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "adventure") }
     private val main = Handler(Looper.getMainLooper())
+    private val autoListenPolicy = AutoListenPolicy()
+
+    /** Contextual listening after Andy speaks; persisted so it survives a restart. */
+    @Volatile
+    private var autoListen: Boolean = context
+        .getSharedPreferences("cough_to_pause", Context.MODE_PRIVATE)
+        .getBoolean("auto_listen", true)
 
     private val _state = MutableStateFlow(
         AdventureUiState(
@@ -72,6 +80,7 @@ class AdventureController(private val context: Context) {
             aiBaseUrl = aiConfig.baseUrl,
             aiModel = aiConfig.model,
             aiKeyPresent = aiConfig.apiKey.isNotBlank(),
+            autoListen = autoListen,
         ),
     )
     val state: StateFlow<AdventureUiState> = _state.asStateFlow()
@@ -425,9 +434,40 @@ class AdventureController(private val context: Context) {
         }
     }
 
+    // ---------------------------------------------------------------- contextual window
+
+    /**
+     * Called when narration settles. If Andy just finished an RPG scene and the player has the
+     * contextual window enabled, hand the microphone over so they can simply answer.
+     *
+     * The detector is off only for the bounded window; silence or a timeout returns it untouched.
+     */
+    fun onNarrationState(status: dev.harness.coughtopause.core.PlaybackStatus, scriptId: String, generation: Long) {
+        val listen = autoListenPolicy.shouldListen(
+            enabled = autoListen,
+            status = status,
+            scriptId = scriptId,
+            generation = generation,
+            alreadyListening = voice?.isListening == true,
+        )
+        if (listen) {
+            _state.update { it.copy(message = "Listening — answer Andy, or ignore it.") }
+            startVoice()
+        }
+    }
+
+    fun setAutoListen(enabled: Boolean) {
+        autoListen = enabled
+        autoListenPolicy.reset()
+        context.getSharedPreferences("cough_to_pause", Context.MODE_PRIVATE)
+            .edit().putBoolean("auto_listen", enabled).apply()
+        _state.update { it.copy(autoListen = enabled) }
+    }
+
     // ---------------------------------------------------------------- voice input
 
     fun startVoice() {
+        if (voice?.isListening == true) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _state.update { it.copy(voice = VoiceState.Failed("no speech recogniser on this device")) }
             return

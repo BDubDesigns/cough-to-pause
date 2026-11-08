@@ -69,6 +69,14 @@ private fun HarnessApp() {
     var screen by remember { mutableIntStateOf(Screens.MAIN) }
 
     LaunchedEffect(Unit) { adventureController.restore() }
+    // Andy finished a scene: offer the contextual listening window.
+    LaunchedEffect(state.narration.status, state.narration.generation) {
+        adventureController.onNarrationState(
+            state.narration.status,
+            state.narration.scriptId,
+            state.narration.generation,
+        )
+    }
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { adventureController.shutdown() }
     }
@@ -143,6 +151,7 @@ private fun HarnessApp() {
             onDeleteSaves = { adventureController.deleteAllCampaigns() },
             onSaveAi = { baseUrl, model, key -> adventureController.saveAiConfig(baseUrl, model, key) },
             onTestAi = { adventureController.testAi() },
+            onAutoListenChange = { adventureController.setAutoListen(it) },
             onBack = {
                 NarrationService.enterHarness(context)
                 screen = Screens.MAIN
