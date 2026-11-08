@@ -15,9 +15,14 @@ import dev.harness.coughtopause.rpg.CampaignId
 import dev.harness.coughtopause.rpg.ChallengeKey
 import dev.harness.coughtopause.rpg.CheckRequest
 import dev.harness.coughtopause.rpg.CreateCampaignResult
+import dev.harness.coughtopause.rpg.CheckOutcome
+import dev.harness.coughtopause.rpg.DifficultyTier
+import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameCommand
 import dev.harness.coughtopause.rpg.GameCommand.AttemptCheck
 import dev.harness.coughtopause.rpg.GameCommand.Travel
+import dev.harness.coughtopause.rpg.ProposedFact
+import dev.harness.coughtopause.rpg.WorldProposal
 import dev.harness.coughtopause.rpg.RollImportance
 import dev.harness.coughtopause.rpg.Submission
 import dev.harness.coughtopause.rpg.Validated
@@ -169,7 +174,13 @@ class AdventureController(private val context: Context) {
                 locations = current.world.locations.values.map { it.id.value to it.name },
                 npcs = current.world.npcs.values
                     .filter { it.locationId == current.currentLocationId }
-                    .map { it.id.value to it.name },
+                    .map { npc ->
+                        NpcView(
+                            id = npc.id.value,
+                            name = npc.name,
+                            topics = NpcTopics.forNpc(npc).map { it.key to it.label },
+                        )
+                    },
             )
             val intent = interpreter.interpret(action, world)
             transcript += "> $text"
@@ -193,6 +204,7 @@ class AdventureController(private val context: Context) {
                     publish()
                     narrate(emptyList(), preferLocationFirst = false)
                 }
+                is AdventureIntent.Ask -> handleAsk(current, intent)
                 is AdventureIntent.Travel -> submit(current, Travel(engine.newActionId(), intent.destination))
                 is AdventureIntent.Check -> submit(
                     current,
@@ -216,7 +228,11 @@ class AdventureController(private val context: Context) {
     }
 
     private fun submit(current: Campaign, command: GameCommand) {
-        when (val result = engine.submit(current.id, command)) {
+        handle(engine.submit(current.id, command), current)
+    }
+
+    private fun handle(result: Submission, current: Campaign) {
+        when (result) {
             is Submission.Committed -> {
                 campaign = engine.load(current.id) ?: current
                 transcript += "The world answers."
@@ -236,6 +252,75 @@ class AdventureController(private val context: Context) {
             is Submission.Unavailable -> {
                 _state.update { it.copy(busy = false, message = result.reason) }
             }
+        }
+    }
+
+    /**
+     * "ask <npc> about <topic>". The check decides whether the fact is revealed; the fact itself is
+     * authored data committed through the engine's normal world-proposal path, so a conversation
+     * can never invent world truth.
+     */
+    private fun handleAsk(current: Campaign, intent: AdventureIntent.Ask) {
+        val npc = current.world.npcs[intent.npc]
+        if (npc == null) {
+            transcript += "There is no one called ${intent.name} here."
+            publish()
+            return
+        }
+        val topics = NpcTopics.forNpc(npc)
+        val topic = topics.firstOrNull { it.key == intent.topicKey }
+        if (topic == null) {
+            transcript += if (topics.isEmpty()) {
+                "${npc.name} has nothing more to say."
+            } else {
+                "${npc.name} would talk about: " + topics.joinToString(", ") { it.label }
+            }
+            publish()
+            return
+        }
+        if (current.world.facts.any { it.text == topic.fact }) {
+            transcript += "${npc.name} has already told you that."
+            publish()
+            return
+        }
+
+        val check = AttemptCheck(
+            actionId = engine.newActionId(),
+            request = CheckRequest(
+                skill = topic.skill,
+                difficulty = DifficultyTier.MODERATE,
+                challenge = ChallengeKey(npc.id.value, "topic-${topic.key}"),
+                intent = "ask ${npc.name} about ${topic.label}",
+                importance = RollImportance.IMPORTANT,
+            ),
+        )
+        when (val result = engine.submit(current.id, check)) {
+            is Submission.Committed -> {
+                val succeeded = result.events.any { event ->
+                    val outcome = (event.payload as? EventPayload.CheckResolved)?.roll?.outcome
+                    outcome == CheckOutcome.SUCCESS || outcome == CheckOutcome.AUTOMATIC_SUCCESS
+                }
+                if (!succeeded) {
+                    campaign = engine.load(current.id) ?: current
+                    transcript += "${npc.name} deflects: \"Another time.\""
+                    publish()
+                    narrate(result.events, preferLocationFirst = false)
+                    return
+                }
+                val commit = engine.submit(
+                    current.id,
+                    GameCommand.CommitWorldProposal(
+                        engine.newActionId(),
+                        WorldProposal(facts = listOf(ProposedFact(npc.id.value, topic.fact))),
+                    ),
+                )
+                campaign = engine.load(current.id) ?: current
+                transcript += "${npc.name} tells you: ${topic.fact}"
+                val events = result.events + (commit as? Submission.Committed)?.events.orEmpty()
+                publish()
+                narrate(events, preferLocationFirst = false)
+            }
+            else -> handle(result, current)
         }
     }
 

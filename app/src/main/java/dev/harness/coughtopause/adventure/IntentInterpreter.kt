@@ -11,6 +11,9 @@ sealed interface AdventureIntent {
     data object Look : AdventureIntent
     data class Travel(val destination: LocationId, val name: String) : AdventureIntent
     data class Talk(val npc: NpcId, val name: String) : AdventureIntent
+
+    /** "ask Marta about the barrow". [topicKey] is null when the player did not name a topic. */
+    data class Ask(val npc: NpcId, val name: String, val topicKey: String?) : AdventureIntent
     data class Check(
         val skill: SkillId,
         val difficulty: DifficultyTier,
@@ -27,7 +30,14 @@ sealed interface AdventureIntent {
 data class WorldView(
     val locationId: String,
     val locations: List<Pair<String, String>>,
-    val npcs: List<Pair<String, String>>,
+    val npcs: List<NpcView>,
+)
+
+data class NpcView(
+    val id: String,
+    val name: String,
+    /** key to label, so the interpreter can recognise "ask about the barrow". */
+    val topics: List<Pair<String, String>> = emptyList(),
 )
 
 /**
@@ -48,8 +58,19 @@ class IntentInterpreter {
         }
         if (LOOK.any { text == it || text.startsWith("$it ") }) return AdventureIntent.Look
 
-        findEntity(text, world.npcs)?.let { (id, name) ->
-            if (TALK.any { text.contains(it) }) return AdventureIntent.Talk(NpcId(id), name)
+        // "ask <name> about <topic>" — checked before plain talk so the topic is not lost.
+        if (text.startsWith("ask") || text.contains(" ask ")) {
+            val npc = findNpc(text, world)
+            if (npc != null) {
+                val topic = npc.topics.firstOrNull { (key, label) ->
+                    text.contains(key) || text.contains(label.lowercase())
+                }
+                return AdventureIntent.Ask(NpcId(npc.id), npc.name, topic?.first)
+            }
+        }
+
+        findNpc(text, world)?.let { npc ->
+            if (TALK.any { text.contains(it) }) return AdventureIntent.Talk(NpcId(npc.id), npc.name)
         }
         findEntity(text, world.locations)?.let { (id, name) ->
             if (text.contains("go") || text.contains("travel") || text.contains("walk") ||
@@ -58,16 +79,14 @@ class IntentInterpreter {
                 return AdventureIntent.Travel(LocationId(id), name)
             }
         }
-        if (TALK.any { text.contains(it) } && world.npcs.isNotEmpty()) {
-            // "talk to someone" with no name: pick the only NPC here, if there is exactly one.
-            if (world.npcs.size == 1) {
-                val (id, name) = world.npcs.first()
-                return AdventureIntent.Talk(NpcId(id), name)
-            }
+        if (TALK.any { text.contains(it) } && world.npcs.size == 1) {
+            // "talk to someone" with no name: pick the only NPC here.
+            val only = world.npcs.first()
+            return AdventureIntent.Talk(NpcId(only.id), only.name)
         }
 
         SKILL_WORDS.firstOrNull { (word, _) -> text.contains(word) }?.let { (word, skill) ->
-            val subject = findEntity(text, world.npcs)?.first
+            val subject = findNpc(text, world)?.id
                 ?: findEntity(text, world.locations)?.first
                 ?: world.locationId
             return AdventureIntent.Check(
@@ -83,6 +102,10 @@ class IntentInterpreter {
 
     private fun findEntity(text: String, candidates: List<Pair<String, String>>): Pair<String, String>? =
         candidates.firstOrNull { (_, name) -> name.isNotBlank() && text.contains(normalise(name)) }
+
+    private fun findNpc(text: String, world: WorldView): NpcView? =
+        world.npcs.firstOrNull { it.name.isNotBlank() && text.contains(normalise(it.name)) }
+            ?: world.npcs.singleOrNull()
 
     private fun normalise(input: String): String = input.lowercase()
         .replace(Regex("[^a-z0-9 ]"), " ")

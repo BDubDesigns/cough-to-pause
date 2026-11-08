@@ -84,6 +84,9 @@ class DeterministicNarrator : NarrativeProvider {
                 }
                 is EventPayload.GoldSpent ->
                     lines += "You spend ${payload.amount} gold on ${payload.purpose}."
+                is EventPayload.WorldContentAccepted -> payload.facts.forEach { factId ->
+                    campaign.world.facts.firstOrNull { it.id == factId }?.let { lines += it.text }
+                }
                 is EventPayload.EncounterStarted ->
                     lines += "Something hostile is here (combat is not part of this slice)."
                 else -> Unit
