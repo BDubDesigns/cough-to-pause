@@ -185,4 +185,24 @@ class NpcConversationTest {
         assertTrue(replay is Submission.Replayed)
         assertEquals(count, engine.load(world.id)!!.world.facts.count { it.text == fact })
     }
+
+    @Test
+    fun factsTheWorldAlreadySeedsCanStillBeSpoken() {
+        val engine = engine()
+        val world = campaign(engine)
+        val seeded = world.world.facts.first().text
+
+        val lines = NarrationScriptBuilder.build(
+            world,
+            emptyList(),
+            DeterministicNarrator(),
+            preferLocationFirst = false,
+            extraLines = listOf(seeded),
+        )
+        assertTrue(
+            "the seeded fact must reach the narration, got ${lines.map { it.text }}",
+            lines.any { it.text == seeded },
+        )
+        assertTrue("extra lines must respect the cap", lines.size <= NarrationScriptBuilder.MAX_LINES)
+    }
 }

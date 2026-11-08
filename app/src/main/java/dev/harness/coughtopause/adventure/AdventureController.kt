@@ -279,8 +279,11 @@ class AdventureController(private val context: Context) {
             return
         }
         if (current.world.facts.any { it.text == topic.fact }) {
-            transcript += "${npc.name} has already told you that."
+            // The fallback region already seeds some of these facts. A player who asks anyway
+            // should hear what they know, not be told to go away.
+            transcript += "${npc.name} confirms: ${topic.fact}"
             publish()
+            narrate(emptyList(), preferLocationFirst = false, extraLines = listOf(topic.fact))
             return
         }
 
@@ -318,21 +321,31 @@ class AdventureController(private val context: Context) {
                 transcript += "${npc.name} tells you: ${topic.fact}"
                 val events = result.events + (commit as? Submission.Committed)?.events.orEmpty()
                 publish()
-                narrate(events, preferLocationFirst = false)
+                narrate(events, preferLocationFirst = false, extraLines = listOf(topic.fact))
             }
             else -> handle(result, current)
         }
     }
 
-    private fun narrate(events: List<dev.harness.coughtopause.rpg.GameEvent>, preferLocationFirst: Boolean) {
+    private fun narrate(
+        events: List<dev.harness.coughtopause.rpg.GameEvent>,
+        preferLocationFirst: Boolean,
+        extraLines: List<String> = emptyList(),
+    ) {
         val current = campaign ?: return
-        var lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst)
+        var lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst, extraLines)
         if (lines.isEmpty() && narrator.id == "llm") {
             // The model failed: say so once, then narrate deterministically rather than going silent.
             val reason = (narrator as? LlmNarrator)?.lastError ?: "unavailable"
             transcript += "(AI unavailable: $reason — scripted narration)"
             _state.update { it.copy(aiLastError = reason) }
-            lines = NarrationScriptBuilder.build(current, events, DeterministicNarrator(), preferLocationFirst)
+            lines = NarrationScriptBuilder.build(
+                current,
+                events,
+                DeterministicNarrator(),
+                preferLocationFirst,
+                extraLines,
+            )
         }
         if (lines.isEmpty()) {
             _state.update { it.copy(busy = false) }
