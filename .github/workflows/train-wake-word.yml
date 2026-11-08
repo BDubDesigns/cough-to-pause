@@ -1,0 +1,27 @@
+name: train-wake-word
+on:
+  workflow_dispatch:
+    inputs:
+      phrase: { description: "wake phrase", default: "hey andy", required: true }
+      steps:  { description: "training steps", default: "20000", required: true }
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install --no-cache-dir "openwakeword[train]" "tensorflow-cpu==2.15.0" onnx onnx2tf==1.19.0 onnxruntime==1.17.1
+      - name: Environment report
+        run: python -c "import openwakeword, tensorflow as tf, onnx2tf, sys; print('ok', openwakeword.__version__, tf.__version__, sys.version)"
+      - name: Train
+        run: |
+          echo "phrase=${{ inputs.phrase }} steps=${{ inputs.steps }}"
+          python -m openwakeword.train --help || (echo 'training CLI missing; needs the notebook path' >&2 && exit 1)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: wake-word-model, path: "**/*.tflite", if-no-files-found: warn }
