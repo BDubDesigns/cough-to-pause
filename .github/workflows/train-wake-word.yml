@@ -1,29 +1,31 @@
 name: train-wake-word
+# Verifies the Hey Andy wake-word toolchain (see scripts/wakeword/README.md).
+# This job is the CPU *smoke* pipeline: real openWakeWord auto_train + ONNX export on synthetic
+# features, ONNX -> TFLite in a separate TensorFlow env, then the Android-contract checks.
+# It does NOT train a usable model: that needs a GPU, TTS clips and ~20 GB of negative-speech
+# features, which hosted runners do not have.  Use scripts/wakeword/hey_andy_colab.ipynb for that.
 on:
   workflow_dispatch:
-    inputs:
-      phrase: { description: "wake phrase", default: "hey andy", required: true }
-      steps:  { description: "training steps", default: "20000", required: true }
+  pull_request:
+    paths:
+      - "scripts/wakeword/**"
+      - ".github/workflows/train-wake-word.yml"
 jobs:
-  train:
+  smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Install
+      - run: pip install uv
+      - name: Smoke pipeline
+        run: sh scripts/wakeword/run_pipeline.sh smoke "$RUNNER_TEMP/wakeword"
+      - name: Collect artifacts
+        if: always()
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install --no-cache-dir "tensorflow-cpu==2.19.0" "onnx==1.17.0" "onnxruntime==1.18.1" "onnx2tf[all]==1.26.3" "openwakeword[train]" piper-tts "numpy<2"
-          pip install --no-cache-dir "tf_keras>=2.19" "protobuf<6" --no-deps
-      - name: Environment report
-        env: { TF_USE_LEGACY_KERAS: "1" }
-        run: python -c "import openwakeword, tensorflow as tf, onnx2tf, sys; print('ok', openwakeword.__version__, tf.__version__, sys.version)"
-      - name: Train
-        run: |
-          echo "phrase=${{ inputs.phrase }} steps=${{ inputs.steps }}"
-          python -m openwakeword.train --help || (echo 'training CLI missing; needs the notebook path' >&2 && exit 1)
+          mkdir -p smoke-artifacts
+          cp "$RUNNER_TEMP"/wakeword/out/smoke/* "$RUNNER_TEMP"/wakeword/assets/*.tflite smoke-artifacts/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: wake-word-model, path: "**/*.tflite", if-no-files-found: warn }
+        with: { name: wake-word-smoke, path: smoke-artifacts, if-no-files-found: warn }
