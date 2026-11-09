@@ -64,36 +64,14 @@ private fun HarnessApp() {
     val context = LocalContext.current
     val state by HarnessState.state.collectAsStateWithLifecycle()
     val store = remember { SessionStore(context) }
-    val adventureController = remember { AdventureController(context) }
+    val adventureController = remember { AdventureController.obtain(context) }
     val adventureState by adventureController.state.collectAsStateWithLifecycle()
     var screen by remember { mutableIntStateOf(Screens.MAIN) }
 
     LaunchedEffect(Unit) { adventureController.restore() }
-    // Andy finished a scene: offer the contextual listening window.
-    LaunchedEffect(state.narration.status, state.narration.generation) {
-        adventureController.onNarrationState(
-            state.narration.status,
-            state.narration.scriptId,
-            state.narration.generation,
-        )
-    }
-    // Cough-to-wake: the detector's accepted coughs, replayed from the one detection slot.
-    // The controller drops a repeated delivery of the same event by its own timestamp.
-    LaunchedEffect(state.lastDetection) {
-        val detection = state.lastDetection ?: return@LaunchedEffect
-        adventureController.onCoughDetected(
-            detectionAtMs = detection.atMs,
-            status = state.narration.status,
-            scriptId = state.narration.scriptId,
-        )
-    }
-    // Cough-to-wake is scoped to the Adventure screen; the M0 harness keeps its own behaviour.
-    LaunchedEffect(screen) {
-        adventureController.setInAdventure(screen == Screens.ADVENTURE)
-    }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { adventureController.shutdown() }
-    }
+    // Narration completions, coughs and the adventure mode all live in service-owned shared state:
+    // the hands-free loop keeps running while this Activity is stopped or the screen is locked, so
+    // it must not depend on a Compose effect or on collectAsStateWithLifecycle.
     var hasMic by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -124,7 +102,11 @@ private fun HarnessApp() {
         NarrationService.ensureRunning(context)
     }
 
-    BackHandler(enabled = screen != Screens.MAIN) { screen = Screens.MAIN }
+    BackHandler(enabled = screen != Screens.MAIN) {
+        // Same transition as the screen's own Back: leave adventure mode in the service.
+        NarrationService.enterHarness(context)
+        screen = Screens.MAIN
+    }
 
     if (!hasMic) {
         Column(modifier = Modifier.padding(24.dp)) {
@@ -209,6 +191,8 @@ private fun HarnessApp() {
                 screen = Screens.ADVENTURE
             },
             onQuit = {
+                // Stop the window and forget the scene before the service goes down.
+                adventureController.quit()
                 NarrationService.quit(context)
                 (context as? android.app.Activity)?.finish()
             },

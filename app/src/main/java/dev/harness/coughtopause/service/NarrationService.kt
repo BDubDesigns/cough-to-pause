@@ -462,6 +462,7 @@ class NarrationService : Service() {
         if (intent == null) return
         when (val action = intent.action) {
             ACTION_ENTER_ADVENTURE -> {
+                HarnessState.update { it.copy(adventureMode = true) }
                 // Leaving the harness must not leave its checkpoint behind: otherwise "Play"
                 // resumes the M0 test dialogue while the player is in the adventure.
                 if (controller.snapshot().scriptId == NarrationScript.SCRIPT_ID) {
@@ -472,12 +473,14 @@ class NarrationService : Service() {
                 }
             }
             ACTION_ENTER_HARNESS -> {
+                HarnessState.update { it.copy(adventureMode = false) }
                 if (controller.snapshot().scriptId != NarrationScript.SCRIPT_ID) {
                     execute(controller.loadScript(NarrationScript.SCRIPT_ID, NarrationScript.LINES))
                 }
                 HarnessState.log("mode: harness")
             }
             ACTION_QUIT -> {
+                HarnessState.update { it.copy(adventureMode = false) }
                 HarnessState.log("quit: stopping narration and service")
                 quitting = true
                 execute(controller.stop(CommandSource.UI))

@@ -87,6 +87,13 @@ data class UiState(
      * detector released the microphone for *this* one.
      */
     val micWindowSerial: Long = 0,
+
+    /**
+     * Adventure mode as the *service* understands it: set by enterAdventure/enterHarness.
+     * The hands-free loop reads this instead of the Activity's current screen, so it keeps
+     * working when the Activity is stopped or the screen is locked.
+     */
+    val adventureMode: Boolean = false,
     val capture: String = "no capture yet",
     val captureWindows: Long = 0,
     val nearMisses: List<String> = emptyList(),
