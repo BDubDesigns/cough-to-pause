@@ -132,11 +132,12 @@ class RulesTest {
             RuleResult.Rejected(listOf(CommandError.EncounterInProgress)),
             rules.process(result.campaign, GameCommand.Travel(ActionId("e2"), start.locationNamed("Bramblewood").id), NoDice, 11L),
         )
-        // A creature instance is a valid challenge subject.
+        // A creature instance is a valid challenge subject. The check is the player's action for the
+        // round, so both goblins answer it (two misses on a 1).
         val sizeUp = GameCommand.AttemptCheck(
             ActionId("e3"),
             CheckRequest(SkillCatalog.INSIGHT, DifficultyTier.MODERATE, ChallengeKey(encounter.enemies[0].id, "read-intent"), "read the goblin"),
         )
-        assertTrue(rules.process(result.campaign, sizeUp, ScriptedDice(10), 12L) is RuleResult.Applied)
+        assertTrue(rules.process(result.campaign, sizeUp, ScriptedDice(10, 1, 1), 12L) is RuleResult.Applied)
     }
 }

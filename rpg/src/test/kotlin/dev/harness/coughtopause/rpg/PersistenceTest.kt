@@ -59,7 +59,8 @@ class PersistenceTest {
                     requirements = listOf(Requirement.HasItem(ContentCatalog.LOCKPICKS)), importance = RollImportance.ROUTINE,
                 ),
             ),
-            ScriptedDice(11),
+            // The check is made mid-fight, so the rat replies: 1 misses.
+            ScriptedDice(11, 1),
         )
         return c
     }
@@ -87,8 +88,8 @@ class PersistenceTest {
 
     @Test
     fun futureSchemaIsRefusedAndCorruptDataIsReported() {
-        val future = CampaignCodec.encode(richCampaign()).replaceFirst("\"schema\":1", "\"schema\":99")
-        assertEquals(listOf(PersistenceError.UnsupportedSchema(99, 1)), CampaignCodec.decode(future).errors())
+        val future = CampaignCodec.encode(richCampaign()).replaceFirst("\"schema\":${CampaignCodec.SCHEMA_VERSION}", "\"schema\":99")
+        assertEquals(listOf(PersistenceError.UnsupportedSchema(99, CampaignCodec.SCHEMA_VERSION)), CampaignCodec.decode(future).errors())
         assertTrue(CampaignCodec.decode("{not json").errors().single() is PersistenceError.Corrupt)
         assertTrue(CampaignCodec.decode("""{"schema":1}""").errors().single() is PersistenceError.Corrupt)
         val truncated = CampaignCodec.encode(richCampaign()).let { it.substring(0, it.length / 2) }

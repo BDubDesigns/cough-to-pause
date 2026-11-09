@@ -88,6 +88,10 @@ sealed interface CommandError : DomainError {
     data object AlreadyAtFullHealth : CommandError {
         override val message get() = "Already at full health"
     }
+
+    data object NothingToIdentify : CommandError {
+        override val message get() = "There is no creature here to identify"
+    }
 }
 
 const val MAX_GOLD_PER_ACTION = 100_000
@@ -202,7 +206,10 @@ class Rules(
                 request.skill, decision.amount, xpAfter, curve.levelFor(xpBefore), curve.levelFor(xpAfter), decision.reason,
             ),
         )
-        return emptyList()
+        // A check in the middle of a fight (talking the goblin down, searching for a way out) is the
+        // player's action for the round, so the enemies answer it. Without this, checks would be free
+        // actions that bypass the turn order.
+        return if (requireLiveEncounter(tx) != null) finishPlayerTurn(tx, rng) else emptyList()
     }
 
     private fun travel(tx: Transaction, command: GameCommand.Travel): List<DomainError> {
@@ -219,6 +226,8 @@ class Rules(
     }
 
     private fun spendGold(tx: Transaction, command: GameCommand.SpendGold): List<DomainError> {
+        // Paying for a rest or a bribe mid-fight would be a free action outside the turn order.
+        if (requireLiveEncounter(tx) != null) return listOf(CommandError.EncounterInProgress)
         val errors = mutableListOf<DomainError>()
         if (command.amount !in 1..MAX_GOLD_PER_ACTION) errors += CommandError.InvalidAmount(command.amount)
         if (command.purpose.isBlank() || command.purpose.length > 80) errors += CommandError.InvalidText("purpose")
@@ -274,17 +283,20 @@ class Rules(
      * dice come from the per-action seeded [rng], so a retried commit cannot reroll it.
      */
     private fun attack(tx: Transaction, command: GameCommand.Attack, rng: RandomSource): List<DomainError> {
-        val enc = requireLiveEncounter(tx) ?: return listOf(if (tx.state.encounter == null) CommandError.NotInEncounter else CommandError.EncounterOver)
-        val target = resolveTarget(enc, command.targetId) ?: return listOf(CommandError.NoLivingEnemy)
+        val enc = requireLiveEncounter(tx) ?: return listOf(notFighting(tx))
+        val target = resolveTarget(enc, command.targetId) ?: return listOf(missingTarget(command.targetId))
         val template = catalog.creature(target.template) ?: return listOf(CommandError.UnknownCreature(target.template))
         val player = tx.state.player
         val strength = player.attributes.modifier(Attribute.STRENGTH)
+        // Melee trains like any other skill, so its level counts the same way it does in a check.
+        val skillLevel = balance.xpCurve.levelFor(player.skillXp[SkillCatalog.MELEE] ?: 0)
+        val skillBonus = balance.checks.skillBonus(skillLevel)
         val natural = Dice.roll(rng, 20)
-        val total = natural + strength
+        val total = natural + strength + skillBonus
         val hit = total >= template.defense
         tx.emit(
             EventPayload.CheckResolved(
-                attackRoll(tx, command.actionId, target, template, natural, strength, total, hit),
+                attackRoll(tx, command.actionId, target, template, natural, strength, skillLevel, skillBonus, total, hit),
             ),
         )
         // Acting drops last round's guard.
@@ -292,16 +304,13 @@ class Rules(
         if (hit) {
             val dice = CombatMath.weaponDice(player, catalog, balance.combat)
             val damage = CombatMath.rollDamage(dice, strength, rng, balance.combat.minimumDamage)
-            val hpAfter = maxOf(0, target.hp - damage)
-            tx.state = tx.state.copy(encounter = tx.state.encounter!!.damage(target.id, hpAfter))
-            tx.emit(EventPayload.DamageDealt(TurnState.PLAYER, target.id, damage, hpAfter, targetIsPlayer = false))
+            strike(tx, target, damage, SkillCatalog.MELEE)
         }
         return finishPlayerTurn(tx, rng)
     }
 
     private fun defend(tx: Transaction, command: GameCommand.Defend, rng: RandomSource): List<DomainError> {
-        val enc = requireLiveEncounter(tx)
-            ?: return listOf(if (tx.state.encounter == null) CommandError.NotInEncounter else CommandError.EncounterOver)
+        val enc = requireLiveEncounter(tx) ?: return listOf(notFighting(tx))
         val bonus = balance.combat.guardBonus
         tx.state = tx.state.copy(encounter = enc.copy(playerGuard = bonus))
         tx.emit(EventPayload.Defended(bonus))
@@ -313,9 +322,8 @@ class Rules(
         val player = tx.state.player
         return when (spell.kind) {
             SpellKind.DAMAGE -> {
-                val enc = requireLiveEncounter(tx)
-                    ?: return listOf(if (tx.state.encounter == null) CommandError.NotInEncounter else CommandError.EncounterOver)
-                val target = resolveTarget(enc, command.targetId) ?: return listOf(CommandError.NoLivingEnemy)
+                val enc = requireLiveEncounter(tx) ?: return listOf(notFighting(tx))
+                val target = resolveTarget(enc, command.targetId) ?: return listOf(missingTarget(command.targetId))
                 if (player.vitals.mp < spell.mpCost) {
                     return listOf(CommandError.InsufficientMp(spell.mpCost, player.vitals.mp))
                 }
@@ -327,15 +335,13 @@ class Rules(
                 tx.emit(EventPayload.SpellCast(spell.id, target.id, mpAfter))
                 val intelligence = player.attributes.modifier(Attribute.INTELLIGENCE)
                 val damage = CombatMath.rollDamage(spell.damage!!, intelligence, rng, balance.combat.minimumDamage)
-                val hpAfter = maxOf(0, target.hp - damage)
-                tx.state = tx.state.copy(encounter = tx.state.encounter!!.damage(target.id, hpAfter))
-                tx.emit(EventPayload.DamageDealt(TurnState.PLAYER, target.id, damage, hpAfter, targetIsPlayer = false))
+                strike(tx, target, damage, SkillCatalog.MAGIC)
                 finishPlayerTurn(tx, rng)
             }
 
             SpellKind.IDENTIFY -> {
                 val templateId = resolveTemplate(tx.state, command.targetId)
-                    ?: return listOf(CommandError.UnknownTarget(command.targetId ?: "?"))
+                    ?: return listOf(command.targetId?.let { CommandError.UnknownTarget(it) } ?: CommandError.NothingToIdentify)
                 if (templateId in tx.state.identified) {
                     // Known already: free to read, and it does not cost the turn.
                     tx.emit(EventPayload.CreatureIdentified(templateId, learned = false, mpAfter = player.vitals.mp))
@@ -377,8 +383,7 @@ class Rules(
     }
 
     private fun retreat(tx: Transaction, command: GameCommand.Retreat, rng: RandomSource): List<DomainError> {
-        val enc = requireLiveEncounter(tx)
-            ?: return listOf(if (tx.state.encounter == null) CommandError.NotInEncounter else CommandError.EncounterOver)
+        val enc = requireLiveEncounter(tx) ?: return listOf(notFighting(tx))
         // Mark it over first: a parting blow must not turn a retreat into a victory.
         tx.state = tx.state.copy(encounter = enc.copy(status = EncounterStatus.RETREATED, playerGuard = 0))
         if (enemyTurn(tx, rng)) {
@@ -393,14 +398,34 @@ class Rules(
     private fun requireLiveEncounter(tx: Transaction): Encounter? =
         tx.state.encounter?.takeIf { it.status == EncounterStatus.ACTIVE }
 
+    private fun notFighting(tx: Transaction): CommandError =
+        if (tx.state.encounter == null) CommandError.NotInEncounter else CommandError.EncounterOver
+
+    private fun missingTarget(targetId: String?): CommandError =
+        targetId?.let { CommandError.UnknownTarget(it) } ?: CommandError.NoLivingEnemy
+
     private fun resolveTarget(enc: Encounter, targetId: String?): CreatureInstance? =
         if (targetId == null) enc.livingEnemies.firstOrNull()
         else enc.livingEnemies.firstOrNull { it.id == targetId }
 
-    /** An enemy id resolves through the encounter; otherwise treat the id as a creature template. */
+    /** The player's blow lands on [target]: one place that lowers enemy HP and records it. */
+    private fun strike(tx: Transaction, target: CreatureInstance, damage: Int, skill: SkillId) {
+        val hpAfter = maxOf(0, target.hp - damage)
+        tx.state = tx.state.copy(encounter = tx.state.encounter!!.damage(target.id, hpAfter))
+        tx.emit(EventPayload.DamageDealt(TurnState.PLAYER, target.id, damage, hpAfter, targetIsPlayer = false, skill = skill))
+    }
+
+    /**
+     * An enemy id resolves through the encounter; otherwise treat the id as a creature template.
+     * No target means "what I am fighting": the first living enemy, else the first enemy of the
+     * fight that just ended, so "cast identify" works without naming anything.
+     */
     private fun resolveTemplate(campaign: Campaign, targetId: String?): CreatureTemplateId? {
-        if (targetId == null) return null
-        campaign.encounter?.enemies?.firstOrNull { it.id == targetId }?.let { return it.template }
+        val enc = campaign.encounter
+        if (targetId == null) {
+            return (enc?.livingEnemies?.firstOrNull() ?: enc?.enemies?.firstOrNull())?.template
+        }
+        enc?.enemies?.firstOrNull { it.id == targetId }?.let { return it.template }
         val asTemplate = CreatureTemplateId(targetId)
         return if (catalog.creature(asTemplate) != null) asTemplate else null
     }
@@ -413,7 +438,10 @@ class Rules(
             val player = tx.state.player
             val defense = CombatMath.playerDefense(player, catalog, balance.combat, enc.playerGuard)
             val natural = Dice.roll(rng, 20)
-            if (natural + template.attackBonus < defense) continue
+            val total = natural + template.attackBonus
+            val hit = total >= defense
+            tx.emit(EventPayload.EnemyAttacked(enemy.id, natural, template.attackBonus, total, defense, hit))
+            if (!hit) continue
             val damage = CombatMath.rollDamage(template.damage, 0, rng, balance.combat.minimumDamage)
             val hpAfter = maxOf(0, player.vitals.hp - damage)
             tx.state = tx.state.copy(player = player.copy(vitals = player.vitals.copy(hp = hpAfter)))
@@ -457,7 +485,43 @@ class Rules(
             encounter = enc.copy(status = EncounterStatus.VICTORY, playerGuard = 0),
         )
         tx.emit(EventPayload.EncounterEnded(EncounterStatus.VICTORY, gold = gold, items = loot))
+        awardVictoryXp(tx, enc)
         return emptyList()
+    }
+
+    /**
+     * Creature XP ([BalanceConfig.creatureXp]) for every enemy felled, paid to the skill that felled
+     * it. Keyed in the XP ledger by (skill, encounter, "victory"), so an encounter pays once even if
+     * a later rule ever reached this path again; the action id already stops a replay.
+     */
+    private fun awardVictoryXp(tx: Transaction, enc: Encounter) {
+        val blows = tx.allEvents().mapNotNull { it.payload as? EventPayload.DamageDealt }
+        val earned = linkedMapOf<SkillId, Int>()
+        enc.enemies.forEach { enemy ->
+            val template = catalog.creature(enemy.template) ?: return@forEach
+            val felledBy = blows.lastOrNull { !it.targetIsPlayer && it.targetId == enemy.id && it.hpAfter == 0 }
+            val skill = felledBy?.skill ?: SkillCatalog.MELEE
+            earned.merge(skill, balance.creatureXp.forCreature(template.level, template.threat), Int::plus)
+        }
+        val curve = balance.xpCurve
+        earned.forEach { (skill, entitled) ->
+            val key = LedgerKey(skill, enc.id.value, VICTORY_TOPIC)
+            val player = tx.state.player
+            val before = player.skillXp[skill] ?: 0
+            val (amount, reason) = when {
+                key in tx.state.xpLedger -> 0 to XpReason.REPEATED_CHALLENGE
+                before >= curve.maxXp -> 0 to XpReason.SKILL_AT_CAP
+                else -> minOf(entitled, curve.maxXp - before) to XpReason.SUCCESS
+            }
+            val after = before + amount
+            if (amount > 0) {
+                tx.state = tx.state.copy(
+                    player = player.copy(skillXp = player.skillXp + (skill to after)),
+                    xpLedger = tx.state.xpLedger + (key to amount),
+                )
+            }
+            tx.emit(EventPayload.SkillXp(skill, amount, after, curve.levelFor(before), curve.levelFor(after), reason))
+        }
     }
 
     /** Bounded defeat: half HP, the campaign's start, a capped gold loss, save intact. */
@@ -471,6 +535,9 @@ class Rules(
             currentLocationId = safe,
             encounter = tx.state.encounter?.copy(status = EncounterStatus.DEFEAT, playerGuard = 0),
         )
+        // Every fight ends with EncounterEnded, whatever the result, so a reader of the log never has
+        // to infer a defeat from a Recovered event.
+        tx.emit(EventPayload.EncounterEnded(EncounterStatus.DEFEAT))
         tx.emit(EventPayload.Recovered(safe, hp, lost))
     }
 
@@ -487,31 +554,30 @@ class Rules(
         template: CreatureTemplate,
         natural: Int,
         modifier: Int,
+        skillLevel: Int,
+        skillBonus: Int,
         total: Int,
         hit: Boolean,
-    ): RollRecord {
-        val skill = SkillCatalog.ATHLETICS
-        val xp = tx.state.player.skillXp[skill] ?: 0
-        return RollRecord(
-            id = RollId("roll-atk-%d".format(tx.nextSequence)),
-            actionId = actionId,
-            skill = skill,
-            attribute = Attribute.STRENGTH,
-            intent = "attack ${template.name}",
-            challenge = ChallengeKey(target.id, "attack"),
-            difficulty = DifficultyTier.MODERATE,
-            difficultyClass = template.defense,
-            natural = natural,
-            attributeModifier = modifier,
-            skillLevel = balance.xpCurve.levelFor(xp),
-            skillBonus = 0,
-            modifiers = emptyList(),
-            total = total,
-            outcome = if (hit) CheckOutcome.SUCCESS else CheckOutcome.FAILURE,
-            explanation = "d20 %d %+d = %d vs defense %d".format(natural, modifier, total, template.defense),
-            importance = RollImportance.IMPORTANT,
-        )
-    }
+    ): RollRecord = RollRecord(
+        id = RollId("roll-atk-%d".format(tx.nextSequence)),
+        actionId = actionId,
+        skill = SkillCatalog.MELEE,
+        attribute = Attribute.STRENGTH,
+        intent = "attack ${template.name}",
+        challenge = ChallengeKey(target.id, ATTACK_TOPIC),
+        // The DC is the creature's defense, not a tier; MODERATE is only the label the record needs.
+        difficulty = DifficultyTier.MODERATE,
+        difficultyClass = template.defense,
+        natural = natural,
+        attributeModifier = modifier,
+        skillLevel = skillLevel,
+        skillBonus = skillBonus,
+        modifiers = emptyList(),
+        total = total,
+        outcome = if (hit) CheckOutcome.SUCCESS else CheckOutcome.FAILURE,
+        explanation = "d20 %d %+d STR %+d melee = %d vs defense %d".format(natural, modifier, skillBonus, total, template.defense),
+        importance = RollImportance.IMPORTANT,
+    )
 
     private fun Encounter.damage(enemyId: String, hpAfter: Int): Encounter =
         copy(enemies = enemies.map { if (it.id == enemyId) it.copy(hp = hpAfter) else it })
@@ -532,6 +598,9 @@ class Rules(
 
         val nextSequence: Int get() = original.events.size + events.size
 
+        /** The campaign's log as it will read after this command commits. */
+        fun allEvents(): List<GameEvent> = original.events + events
+
         fun emit(payload: EventPayload) {
             events += event(nextSequence, actionId, nowMs, payload)
         }
@@ -545,8 +614,14 @@ class Rules(
         }
     }
 
-    private companion object {
-        fun event(sequence: Int, actionId: ActionId?, nowMs: Long, payload: EventPayload) =
+    companion object {
+        /** Topic of every attack roll's [ChallengeKey]; narration uses it to tell attacks from checks. */
+        const val ATTACK_TOPIC = "attack"
+
+        /** Ledger topic for an encounter's victory XP. */
+        const val VICTORY_TOPIC = "victory"
+
+        private fun event(sequence: Int, actionId: ActionId?, nowMs: Long, payload: EventPayload) =
             GameEvent(EventId("evt-%06d".format(sequence)), sequence, actionId, nowMs, payload)
     }
 }

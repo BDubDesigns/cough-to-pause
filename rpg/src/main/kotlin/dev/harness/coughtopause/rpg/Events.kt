@@ -52,6 +52,25 @@ sealed interface EventPayload {
         val amount: Int,
         val hpAfter: Int,
         val targetIsPlayer: Boolean,
+        /**
+         * The player skill that dealt it (Melee for a weapon, Magic for a spell); null for an enemy's
+         * blow, and in saves written before combat XP existed. Victory XP goes to the felling skill.
+         */
+        val skill: SkillId? = null,
+    ) : EventPayload
+
+    /**
+     * One enemy swing, recorded whether it lands or not, so a miss is as explainable as a hit.
+     * A hit is followed by a [DamageDealt] with `targetIsPlayer = true`.
+     */
+    data class EnemyAttacked(
+        val attackerId: String,
+        val natural: Int,
+        val attackBonus: Int,
+        val total: Int,
+        /** The player's defense at the time, guard included. */
+        val defense: Int,
+        val hit: Boolean,
     ) : EventPayload
 
     data class Defended(val bonus: Int) : EventPayload

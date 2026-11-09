@@ -20,14 +20,21 @@ sealed interface PersistenceError : DomainError {
  * so an old build can never silently drop fields written by a newer one.
  */
 object CampaignCodec {
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
 
     /**
-     * `from → transform to from+1`. Empty while v1 is the only schema. To change the format: bump
-     * [SCHEMA_VERSION], add `SCHEMA_VERSION - 1 to { json -> ... }`, and add a test that decodes a
-     * checked-in old document.
+     * `from → transform to from+1`. To change the format: bump [SCHEMA_VERSION], add
+     * `SCHEMA_VERSION - 1 to { json -> ... }`, and add a test that decodes a checked-in old document
+     * (see `src/test/resources/saves`).
+     *
+     * v1 → v2 (combat): v2 adds `identified`, `encounter.playerGuard`, the combat event types and
+     * `DamageDealt.skill`. Every v2 field is optional on read, so a v1 document needs no rewrite —
+     * the bump exists so that a pre-combat build refuses a v2 save as "newer" instead of calling it
+     * corrupt when it meets an event type it has never seen.
      */
-    internal val migrations: Map<Int, (JSONObject) -> JSONObject> = emptyMap()
+    internal val migrations: Map<Int, (JSONObject) -> JSONObject> = mapOf(
+        1 to { json -> json },
+    )
 
     fun encode(c: Campaign): String = JSONObject().apply {
         put("schema", SCHEMA_VERSION)
@@ -140,6 +147,10 @@ object CampaignCodec {
         is EventPayload.DamageDealt -> JSONObject().put("type", "DamageDealt")
             .put("attackerId", p.attackerId).put("targetId", p.targetId).put("amount", p.amount)
             .put("hpAfter", p.hpAfter).put("targetIsPlayer", p.targetIsPlayer)
+            .put("skill", p.skill?.value ?: JSONObject.NULL)
+        is EventPayload.EnemyAttacked -> JSONObject().put("type", "EnemyAttacked")
+            .put("attackerId", p.attackerId).put("natural", p.natural).put("attackBonus", p.attackBonus)
+            .put("total", p.total).put("defense", p.defense).put("hit", p.hit)
         is EventPayload.Defended -> JSONObject().put("type", "Defended").put("bonus", p.bonus)
         is EventPayload.SpellCast -> JSONObject().put("type", "SpellCast")
             .put("spell", p.spell.value).put("targetId", p.targetId ?: JSONObject.NULL).put("mpAfter", p.mpAfter)
@@ -292,6 +303,12 @@ object CampaignCodec {
         "DamageDealt" -> EventPayload.DamageDealt(
             o.getString("attackerId"), o.getString("targetId"), o.getInt("amount"),
             o.getInt("hpAfter"), o.getBoolean("targetIsPlayer"),
+            // Absent before v2.
+            skill = if (o.has("skill") && !o.isNull("skill")) SkillId(o.getString("skill")) else null,
+        )
+        "EnemyAttacked" -> EventPayload.EnemyAttacked(
+            o.getString("attackerId"), o.getInt("natural"), o.getInt("attackBonus"),
+            o.getInt("total"), o.getInt("defense"), o.getBoolean("hit"),
         )
         "Defended" -> EventPayload.Defended(o.getInt("bonus"))
         "SpellCast" -> EventPayload.SpellCast(

@@ -5,7 +5,7 @@ It is pure Kotlin/JVM: no Android imports compile there, so the rules can be tes
 Android SDK and cannot depend on platform behaviour.
 
 ```sh
-./scripts/build.sh :rpg:test     # 66 JVM tests
+./scripts/build.sh :rpg:test     # 97 JVM tests
 ```
 
 The narrator (LLM) **proposes**; this module **decides**. The narrator cannot roll dice, pick a
@@ -28,6 +28,8 @@ rpg/src/main/kotlin/dev/harness/coughtopause/rpg/
   Events.kt             GameEvent + payloads (the explainable history)
   Commands.kt           GameCommand: the only ways to change a campaign
   Rules.kt              pure reducer: (campaign, command, dice, time) → Applied | Replayed | Rejected
+  Combat.kt             spell catalogue, CombatRules (numbers), CombatMath (defense, weapon, damage)
+  Outcomes.kt           OutcomeFacts: events → named mechanical facts, the one input every narrator reads
   WorldProposals.kt     strict parser, validator, id assignment, fallback region
   Codec.kt              versioned JSON for campaigns, canonical command fingerprints
   Store.kt              CampaignStore, FileCampaignStore (atomic), ActionProcessor
@@ -98,8 +100,8 @@ canonical command.
 Dice for an action come from `SplitMix64(seed, action ordinal, hash(action id))`. A retry after
 a crash before commit therefore produces the same roll, so killing the app cannot reroll a bad result.
 
-Commands in this slice: `AttemptCheck`, `Travel`, `SpendGold`, `StartEncounter`,
-`CommitWorldProposal`. There is deliberately no command that grants anything.
+Commands: `AttemptCheck`, `Travel`, `SpendGold`, `StartEncounter`, `Attack`, `Defend`, `Cast`,
+`UseItem`, `Retreat`, `CommitWorldProposal`. There is deliberately no command that grants anything.
 
 ### Persistence
 `FileCampaignStore(dir)` stores one JSON document per campaign. A save writes `<id>.json.tmp`,
@@ -107,7 +109,9 @@ fsyncs it, then does an atomic rename over `<id>.json`. After a crash, load retu
 campaign or the new one in full. A leftover `.tmp` file is ignored. On Android, use
 `File(context.filesDir, "campaigns")`.
 
-Schema strategy: every document carries `"schema": 1`. `CampaignCodec.decode` upgrades older
+Schema strategy: every document carries `"schema"` (currently 2; v2 added the combat fields and
+events, all optional on read, so v1 saves load unchanged — `src/test/resources/saves` holds real v1
+saves written by the pre-combat and first-combat builds, and `CombatReviewTest` loads and plays them). `CampaignCodec.decode` upgrades older
 documents through `CampaignCodec.migrations` (one step per version). It refuses newer documents
 with `UnsupportedSchema` instead of guessing, and reports a truncated, hand-edited or
 inconsistent file (event-log gaps, dangling location) as `Corrupt`.
@@ -136,12 +140,46 @@ edited. `FallbackRegion.proposal` is the hand-written region to use when generat
 through the same validator. New creature or item **templates** from the AI are not accepted yet;
 locations may only reference existing catalog creatures.
 
-### Encounters (data model only)
+### Encounters and combat
 `StartEncounter` takes creatures that are native to the current location (`Location.creatures`)
 and creates instances at template HP. It sets the turn to the player with
 `awaitingPlayerDecision = true`. Nothing advances until the next typed command, so silence never
-acts. `Travel` and a second `StartEncounter` are refused while an encounter is active. Attack,
-defend, spells, MP, damage, loot rolls and defeat belong to the next slice.
+acts.
+
+**One player action is one round.** `Attack`, `Defend`, `Cast` (Ember bolt, or Identify on a new
+entry), `UseItem` and an `AttemptCheck` made mid-fight all end with every living enemy swinging once;
+`Retreat` ends the fight and takes one parting swing. `Travel`, `SpendGold` and a second
+`StartEncounter` are refused while a fight is active. Reading an already-known Identify entry is the
+only free action. All of it is decided inside `Rules.process`, under the action id, so a retried
+command replays the original round instead of rerolling it.
+
+- **Attack:** d20 + STR + Melee skill bonus against the creature's defense, recorded as a `Melee`
+  `CheckResolved` (roll history). Damage: best carried weapon (or unarmed) + STR, minimum 1.
+- **Enemy swings:** every swing is an `EnemyAttacked` event (die, bonus, total, the player's defense
+  with guard), hit or miss; a hit is followed by `DamageDealt`.
+- **Identify:** no target means the enemy in front (or the last fight's). First sight costs MP and the
+  turn; afterwards the entry (level, threat, HP, possible drops) is free to read.
+- **Victory:** gold and loot from the creature templates, granted once in `EncounterEnded`, plus
+  `CreatureXp` per enemy paid to the skill that felled it (Melee for weapons, Magic for spells),
+  recorded in the XP ledger under `(skill, encounter, "victory")`.
+- **Defeat:** `EncounterEnded(DEFEAT)` then `Recovered`: half HP, the campaign's start location, at
+  most `CombatRules.defeatGoldLoss` gold. Skills, items and the save are untouched.
+
+### Narration facts
+`OutcomeFacts.from(campaign, events)` turns committed events into `OutcomeFact`s with names already
+resolved (creature instances, items, spells, skills, places). The scripted narrator speaks them
+(`SpokenOutcome` in the app) and the AI prompt lists them as authoritative results
+(`PromptBuilder.factLine`). Neither reads raw events, so they cannot disagree about a result.
+
+### Adding content
+- **Creature / item:** a catalogue entry in `ContentCatalog.STARTER` (stats, loot table, damage dice,
+  armour, healing). Rules, Identify, loot, XP and both narrators pick it up with no other change.
+- **Spell:** a `SpellCatalog` entry. A new *kind* (heal, buff) needs a `SpellKind` value and a branch
+  in `Rules.cast`; the compiler then points at every `when` that must handle it.
+- **Mechanic:** a command in `Commands.kt`, its reducer in `Rules`, an `EventPayload` for every
+  change, its codec entry (`CampaignCodec`/`CommandCodec`), and one `OutcomeFact` in `OutcomeFacts`.
+  The exhaustive `when`s in the codec, `OutcomeFacts` and the two renderers fail to compile until the
+  new event is described everywhere.
 
 ## Provisional balance constants (need playtest sign-off)
 
@@ -161,7 +199,8 @@ All of these live in `Balance.kt` (plus the starter content in `Catalog.kt` and
 | Failure XP | 50 % of success (min 1) | `XpRewards` |
 | Topics per subject per skill | 3 | `XpRewards` |
 | Starting HP / MP | HP `10 + 2·CON mod` (min 4); MP `4 + 2·INT mod` (min 2) | `VitalsFormula` |
-| Creature XP | `5 · level · {minion 1, standard 2, elite 4}` (defined, not yet used) | `CreatureXp` |
+| Creature XP | `5 · level · {minion 1, standard 2, elite 4}`, paid on victory to the felling skill | `CreatureXp` |
+| Combat | base defense 10 + DEX + best armour; guard +4 for the round; unarmed 1d2; minimum damage 1; defeat loses ≤ 10 gold | `CombatRules` |
 | World proposal budgets | ≤ 8 locations, ≤ 6 NPCs, ≤ 12 facts, ≤ 3 creatures per location, ≥ 2 initial NPCs; name 60 / description 600 / fact 300 chars | `WorldLimits` |
 | Max enemies per encounter | 4 | `BalanceConfig` |
 | Initiative | player acts first | `Rules.startEncounter` |
@@ -193,9 +232,6 @@ farming, and engine-owned outcomes.
   number of times, then use `FallbackRegion.proposal`. Intent interpretation should produce a
   `CheckRequest`. The **orchestrator** chooses the `ChallengeKey` from engine ids, and the engine
   validates everything else.
-- **Combat next:** add attack/defend/cast/use/retreat commands that act on `Encounter`. Use
-  `CreatureTemplate` stats and loot tables, and `CreatureXp` for rewards. Spend MP from `Vitals`.
-  Keep `awaitingPlayerDecision` true between turns.
 
 ## Open design questions
 
