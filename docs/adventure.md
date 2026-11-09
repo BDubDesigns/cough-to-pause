@@ -78,6 +78,23 @@ Rules are implemented in `MicOwnership` (pure, unit tested) and enforced by
 `NarrationService.applyOwner`. The window is bounded (8 s) and closes on result, error, timeout or
 an explicit stop, so the detector can never be left switched off.
 
+### Lifecycle
+
+The loop is orchestrated in application scope, not in the Activity. The service publishes narration,
+detection and the adventure mode; `HandsFreeCoordinator` (pure, unit tested) decides when a window
+should open, and `AdventureController` — a process singleton built on the application context — does
+the work. Compose only observes state and sends user input, so an Activity that is stopped, paused
+or destroyed does not interrupt contextual listening or cough-to-wake.
+
+Verified on the Pixel with the Activity `STOPPED` and again with `mWakefulness=Dozing` and
+`mScreenState=OFF`: the scene finished, the window opened, the detector released the microphone
+before the recogniser started, and the detector returned when the window closed. The service keeps a
+partial wake lock while running, so detection continues with the display off.
+
+Being on the Adventure screen is what arms the loop, and that is now service-owned
+(`HarnessState.adventureMode`, set by `enterAdventure`/`enterHarness`/`quit`): entering the adventure
+once is enough, and leaving it closes any open window and disarms the gesture.
+
 ## Wake word: see [wake-word.md](wake-word.md)
 
 A wake word is **not** in this PR. Before proposing a custom model, evaluate off-the-shelf on-device
