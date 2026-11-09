@@ -94,6 +94,8 @@ class AdventureController(private val context: Context) {
     /** True when the current capture came from the automatic window rather than a tap on Speak. */
     @Volatile
     private var autoCapture = false
+    private var lastWakeAt = 0L
+    private var lastScene: List<String> = emptyList()
 
     // ---------------------------------------------------------------- campaign lifecycle
 
@@ -204,6 +206,7 @@ class AdventureController(private val context: Context) {
                     narrate(emptyList(), preferLocationFirst = true)
                 }
                 is AdventureIntent.Help -> {
+                    if (WakePhrase.strip(text).isEmpty()) { replayLastScene(); return@execute }
                     transcript += "Try: look · go to <place> · talk to <name> · climb/search/persuade/read …"
                     publish()
                 }
@@ -364,6 +367,7 @@ class AdventureController(private val context: Context) {
             _state.update { it.copy(busy = false) }
             return
         }
+        lastScene = lines.map { it.text }
         lines.forEach { transcript += "${WakePhrase.NAME}: ${it.text}" }
         NarrationService.narrateScene(
             context,
@@ -458,6 +462,30 @@ class AdventureController(private val context: Context) {
             _state.update { it.copy(message = "Listening — say \"Andy, …\" to answer, or ignore it.") }
             startVoice(fromAutoWindow = true)
         }
+    }
+
+    // A cough heard after narration finished: open a listening window, replay nothing.
+    fun onCoughDetected(status: dev.harness.coughtopause.core.PlaybackStatus, scriptId: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val wake = CoughWakePolicy.shouldWake(
+            inAdventure = campaign != null,
+            status = status,
+            scriptId = scriptId,
+            windowOpen = voice?.isListening == true,
+            sinceLastWakeMs = now - lastWakeAt,
+        )
+        if (!wake) return
+        lastWakeAt = now
+        _state.update { it.copy(message = "Cough heard - listening. Say \"Andy, ...\".") }
+        startVoice(fromAutoWindow = true)
+    }
+
+    // Replay the last prompt from saved lines; never re-runs rules, dice or rewards.
+    fun replayLastScene() {
+        if (lastScene.isEmpty()) return
+        NarrationService.narrateScene(context, "rpg-replay-" + System.currentTimeMillis(), lastScene)
+        transcript += "(replayed the last prompt)"
+        publish()
     }
 
     fun setAutoListen(enabled: Boolean) {
