@@ -1,5 +1,6 @@
 package dev.harness.coughtopause.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -82,7 +83,7 @@ fun AdventureScreen(
         if (snapshot == null) {
             CharacterCreationCard(backgrounds, onBegin, onRestore, adventure.busy)
         } else {
-            LocationCard(snapshot, harness)
+            LocationCard(snapshot, harness, onAct)
             snapshot.encounter?.let { CombatCard(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onNewAdventure) { Text("New adventure") }
@@ -181,7 +182,7 @@ private fun CharacterCreationCard(
 }
 
 @Composable
-private fun LocationCard(snapshot: AdventureSnapshot, harness: UiState) {
+private fun LocationCard(snapshot: AdventureSnapshot, harness: UiState, onAct: (String) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,6 +193,20 @@ private fun LocationCard(snapshot: AdventureSnapshot, harness: UiState) {
             Text(snapshot.locationDescription, style = MaterialTheme.typography.bodyMedium)
             if (snapshot.npcs.isNotEmpty()) {
                 Text("Here: " + snapshot.npcs.joinToString(" · "), style = TelemetryStyle)
+            }
+            // What each person will actually discuss: tap a topic instead of guessing the phrasing.
+            snapshot.npcPrompts.filter { it.topics.isNotEmpty() }.forEach { npc ->
+                Text("${npc.name} will talk about:", style = TelemetryStyle)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    npc.topics.forEach { topic ->
+                        OutlinedButton(onClick = { onAct("ask ${npc.name} about $topic") }) {
+                            Text(topic, style = TelemetryStyle)
+                        }
+                    }
+                }
             }
             if (snapshot.exits.isNotEmpty()) {
                 Text("Exits: " + snapshot.exits.joinToString(", "), style = TelemetryStyle)

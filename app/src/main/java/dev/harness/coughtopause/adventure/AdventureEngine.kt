@@ -24,6 +24,8 @@ import dev.harness.coughtopause.rpg.Submission
 import dev.harness.coughtopause.rpg.Validated
 import java.io.File
 
+data class NpcPrompt(val name: String, val role: String, val topics: List<String>)
+
 /** One resolved roll, as the UI shows it. */
 data class RollView(
     val skill: String,
@@ -43,6 +45,8 @@ data class AdventureSnapshot(
     val locationName: String,
     val locationDescription: String,
     val npcs: List<String>,
+    /** Who is here and what they will discuss, so a topic list is visible without guessing. */
+    val npcPrompts: List<NpcPrompt> = emptyList(),
     val exits: List<String>,
     val hp: Int,
     val maxHp: Int,
@@ -162,6 +166,15 @@ class AdventureEngine(
             locationName = location?.name ?: "unknown",
             locationDescription = location?.description.orEmpty(),
             npcs = npcsHere,
+            npcPrompts = campaign.world.npcs.values
+                .filter { it.locationId == campaign.currentLocationId }
+                .map { npc ->
+                    NpcPrompt(
+                        name = npc.name,
+                        role = npc.role,
+                        topics = dev.harness.coughtopause.adventure.NpcTopics.forNpc(npc).map { it.label },
+                    )
+                },
             exits = exits,
             hp = campaign.player.vitals.hp,
             maxHp = campaign.player.vitals.maxHp,

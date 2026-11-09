@@ -19,6 +19,20 @@ data class NpcTopic(
 
 object NpcTopics {
 
+    /**
+     * What Andy says when the player talks to someone: who they are, and what they will discuss.
+     * Pure so the wording is tested rather than discovered on a phone.
+     */
+    fun lines(npc: Npc): List<String> {
+        val head = "${npc.name}, ${npc.role}: ${npc.description}"
+        val topics = forNpc(npc)
+        return if (topics.isEmpty()) {
+            listOf(head)
+        } else {
+            listOf(head, "${npc.name} will talk about " + topics.joinToString(", ") { it.label } + ".")
+        }
+    }
+
     private val byName: Map<String, List<NpcTopic>> = mapOf(
         "marta vell" to listOf(
             NpcTopic(

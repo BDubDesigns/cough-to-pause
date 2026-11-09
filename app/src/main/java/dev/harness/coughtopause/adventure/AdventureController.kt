@@ -295,13 +295,16 @@ class AdventureController(private val context: Context) {
                 is AdventureIntent.Retreat -> submit(current, GameCommand.Retreat(engine.newActionId()))
                 is AdventureIntent.Talk -> {
                     val npc = current.world.npcs[intent.npc]
-                    transcript += if (npc != null) {
-                        "${npc.name} (${npc.role}): ${npc.description}"
+                    if (npc == null) {
+                        transcript += "There is no one called ${intent.name} here."
+                        publish()
                     } else {
-                        "There is no one called ${intent.name} here."
+                        // Speak the person and what they will discuss, never the room again.
+                        val lines = NpcTopics.lines(npc)
+                        transcript += lines
+                        publish()
+                        speakLines(lines)
                     }
-                    publish()
-                    narrate(emptyList(), preferLocationFirst = false)
                 }
                 is AdventureIntent.Ask -> handleAsk(current, intent)
                 is AdventureIntent.Travel -> submit(current, Travel(engine.newActionId(), intent.destination))
@@ -583,6 +586,16 @@ class AdventureController(private val context: Context) {
     }
 
     // Replay the last prompt from saved lines; never re-runs rules, dice or rewards.
+    /**
+     * Speak lines that are not a scene description (talking to someone): the room is not re-read,
+     * and the scene id still starts with `rpg-`, so the contextual window opens when Andy finishes.
+     */
+    private fun speakLines(lines: List<String>) {
+        if (lines.isEmpty()) return
+        lastScene = lines
+        NarrationService.narrateScene(context, "rpg-talk-" + System.currentTimeMillis(), lines)
+    }
+
     fun replayLastScene() {
         if (lastScene.isEmpty()) {
             // Nothing has been narrated in this session yet (fresh launch after restore): speak the
