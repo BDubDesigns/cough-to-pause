@@ -65,6 +65,28 @@ Pass: ≥ 18/20 detected, ≤ 1 false positive, resume works every time.
 - If the recogniser reports `network` errors here, record it — it means the offline language pack
   is missing and the "local" claim is conditional on the device.
 
+## R9 — Hands-free recovery (cough-to-wake)
+
+The loop this section proves: hear Andy → miss the window → cough → answer, without touching the
+phone. Open the Adventure screen (cough-to-wake is scoped to it; the M0 harness is untouched).
+
+1. Let a scene finish. The contextual window opens by itself:
+   `mic: adventure voice window open (8000ms) → ADVENTURE_ASR`, then
+   `mic: detector released after NNNms - recogniser starting`. The second line is the proof that
+   the recogniser started *after* the detector let go, not in a race with it.
+2. Say nothing. When the recogniser gives up: `mic: adventure voice window closed → DETECTOR` and
+   `mic: listening @ 16000 Hz`, i.e. detection is back. Nothing changes in the game.
+3. Cough deliberately after the window has closed. Expected: a fresh window with no narration
+   replayed. If the cough instead pauses a scene, the state was `PLAYING`, not `COMPLETED` — record
+   which, with the timestamps.
+4. Say "Andy, repeat" (or tap Repeat). Expect `rpg: narrating rpg-replay-…` and no dice, XP or
+   world change; when it finishes, another window opens (step 1 again).
+5. Press Back to leave the Adventure screen mid-window: the window must close and the detector
+   resume (`mic: … closed → DETECTOR`). After that, a cough must not open a game window.
+
+Record for each run: how many coughs were needed per wake, any window that opened while narration
+was still speaking, and whether a cough during a window restarted the recogniser (it must not).
+
 ## Recording
 
 Per run, copy these from Diagnostics into `docs/measurements.md`:

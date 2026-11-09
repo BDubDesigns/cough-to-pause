@@ -77,6 +77,20 @@ private fun HarnessApp() {
             state.narration.generation,
         )
     }
+    // Cough-to-wake: the detector's accepted coughs, replayed from the one detection slot.
+    // The controller drops a repeated delivery of the same event by its own timestamp.
+    LaunchedEffect(state.lastDetection) {
+        val detection = state.lastDetection ?: return@LaunchedEffect
+        adventureController.onCoughDetected(
+            detectionAtMs = detection.atMs,
+            status = state.narration.status,
+            scriptId = state.narration.scriptId,
+        )
+    }
+    // Cough-to-wake is scoped to the Adventure screen; the M0 harness keeps its own behaviour.
+    LaunchedEffect(screen) {
+        adventureController.setInAdventure(screen == Screens.ADVENTURE)
+    }
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { adventureController.shutdown() }
     }
@@ -146,7 +160,7 @@ private fun HarnessApp() {
             onAct = { adventureController.act(it) },
             onSpeak = { adventureController.startVoice() },
             onStopVoice = { adventureController.stopVoice() },
-            onNarrateAgain = { adventureController.act("look") },
+            onNarrateAgain = { adventureController.replayLastScene() },
             onNewAdventure = { adventureController.startFresh() },
             onDeleteSaves = { adventureController.deleteAllCampaigns() },
             onSaveAi = { baseUrl, model, key -> adventureController.saveAiConfig(baseUrl, model, key) },

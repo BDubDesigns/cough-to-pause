@@ -23,6 +23,13 @@ sealed interface AdventureIntent {
     ) : AdventureIntent
 
     data object Help : AdventureIntent
+
+    /**
+     * "Andy, repeat" / "Play" after Andy finished: speak the last prompt again. Carries no ids on
+     * purpose — a repeat must never turn into a second travel or a second check.
+     */
+    data object Repeat : AdventureIntent
+
     data class Unknown(val text: String) : AdventureIntent
 }
 
@@ -56,6 +63,8 @@ class IntentInterpreter {
         if (text == "help" || text == "commands" || text.startsWith("what can i do")) {
             return AdventureIntent.Help
         }
+        // Exact matches only: "play" is a repeat; "play the lute" is not a command this slice knows.
+        if (REPEAT_EXACT.any { text == it }) return AdventureIntent.Repeat
         if (LOOK.any { text == it || text.startsWith("$it ") }) return AdventureIntent.Look
 
         // "ask <name> about <topic>" — checked before plain talk so the topic is not lost.
@@ -115,6 +124,22 @@ class IntentInterpreter {
     private companion object {
         val LOOK = listOf("look", "look around", "where am i", "describe", "survey")
         val TALK = listOf("talk", "speak", "ask", "greet", "chat")
+
+        /** After narration completes, these ask Andy to say it again rather than to act. */
+        val REPEAT_EXACT = listOf(
+            "repeat",
+            "repeat that",
+            "repeat please",
+            "again",
+            "say that again",
+            "say it again",
+            "say again",
+            "replay",
+            "play",
+            "resume",
+            "what did you say",
+            "what was that",
+        )
 
         /** Ordered: the first keyword found wins. */
         val SKILL_WORDS: List<Pair<String, SkillId>> = listOf(

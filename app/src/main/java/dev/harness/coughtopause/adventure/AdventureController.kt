@@ -5,10 +5,13 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import dev.harness.coughtopause.core.CommandSource
+import dev.harness.coughtopause.core.PlaybackStatus
+import dev.harness.coughtopause.platform.HarnessState
 import dev.harness.coughtopause.rpg.BackgroundId
 import dev.harness.coughtopause.rpg.Campaign
 import dev.harness.coughtopause.rpg.CampaignId
@@ -94,8 +97,15 @@ class AdventureController(private val context: Context) {
     /** True when the current capture came from the automatic window rather than a tap on Speak. */
     @Volatile
     private var autoCapture = false
-    private var lastWakeAt = 0L
+    private val coughWake = CoughWakePolicy()
     private var lastScene: List<String> = emptyList()
+
+    /** True only while the Adventure screen is visible, so M0 harness mode keeps its own behaviour. */
+    @Volatile
+    private var inAdventure = false
+
+    /** Identifies the current window request, so a superseded handoff can never start a recogniser. */
+    private var windowRequest = 0
 
     // ---------------------------------------------------------------- campaign lifecycle
 
@@ -206,10 +216,11 @@ class AdventureController(private val context: Context) {
                     narrate(emptyList(), preferLocationFirst = true)
                 }
                 is AdventureIntent.Help -> {
-                    if (WakePhrase.strip(text).isEmpty()) { replayLastScene(); return@execute }
                     transcript += "Try: look · go to <place> · talk to <name> · climb/search/persuade/read …"
                     publish()
                 }
+                // "Andy, repeat" and "Play" re-speak the saved prompt; nothing is submitted here.
+                is AdventureIntent.Repeat -> replayOrResume()
                 is AdventureIntent.Talk -> {
                     val npc = current.world.npcs[intent.npc]
                     transcript += if (npc != null) {
@@ -450,7 +461,7 @@ class AdventureController(private val context: Context) {
      *
      * The detector is off only for the bounded window; silence or a timeout returns it untouched.
      */
-    fun onNarrationState(status: dev.harness.coughtopause.core.PlaybackStatus, scriptId: String, generation: Long) {
+    fun onNarrationState(status: PlaybackStatus, scriptId: String, generation: Long) {
         val listen = autoListenPolicy.shouldListen(
             enabled = autoListen,
             status = status,
@@ -465,26 +476,66 @@ class AdventureController(private val context: Context) {
     }
 
     // A cough heard after narration finished: open a listening window, replay nothing.
-    fun onCoughDetected(status: dev.harness.coughtopause.core.PlaybackStatus, scriptId: String) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        val wake = CoughWakePolicy.shouldWake(
-            inAdventure = campaign != null,
+    fun onCoughDetected(
+        detectionAtMs: Long,
+        status: PlaybackStatus,
+        scriptId: String,
+    ) {
+        val wake = coughWake.onCough(
+            detectionAtMs = detectionAtMs,
+            nowMs = SystemClock.elapsedRealtime(),
+            inAdventure = inAdventure,
             status = status,
             scriptId = scriptId,
             windowOpen = voice?.isListening == true,
-            sinceLastWakeMs = now - lastWakeAt,
         )
         if (!wake) return
-        lastWakeAt = now
         _state.update { it.copy(message = "Cough heard - listening. Say \"Andy, ...\".") }
         startVoice(fromAutoWindow = true)
     }
 
+    /** The Adventure screen calls this on enter and leave so cough-to-wake stays scoped to it. */
+    fun setInAdventure(active: Boolean) {
+        if (inAdventure == active) return
+        inAdventure = active
+        if (!active) {
+            // Leaving the adventure, or quitting: no window may stay open and no cough may wake.
+            windowRequest += 1
+            coughWake.reset()
+            stopVoice()
+        }
+    }
+
+    /** "Play"/"Resume" while paused restarts the interrupted line; after that it repeats the scene. */
+    private fun replayOrResume() {
+        val status = HarnessState.state.value.narration.status
+        when (ReplayPolicy.decide(status, hasLastScene = lastScene.isNotEmpty())) {
+            ReplayAction.RESUME -> {
+                transcript += "(resuming the interrupted line)"
+                publish()
+                NarrationService.resume(context)
+            }
+            ReplayAction.REPLAY -> replayLastScene()
+            ReplayAction.IGNORE -> {
+                transcript += "Andy has not said anything to repeat yet."
+                publish()
+            }
+        }
+    }
+
     // Replay the last prompt from saved lines; never re-runs rules, dice or rewards.
     fun replayLastScene() {
-        if (lastScene.isEmpty()) return
+        if (lastScene.isEmpty()) {
+            // Nothing has been narrated in this session yet (fresh launch after restore): speak the
+            // current scene instead. Still narration only — no command is submitted.
+            narrate(emptyList(), preferLocationFirst = true)
+            return
+        }
+        // A fresh scene id: the service reloads the script (new narration generation), so the
+        // automatic response window opens again when the repeat finishes.
         NarrationService.narrateScene(context, "rpg-replay-" + System.currentTimeMillis(), lastScene)
         transcript += "(replayed the last prompt)"
+        _state.update { it.copy(message = "Repeating the last prompt - answer when Andy finishes.") }
         publish()
     }
 
@@ -500,14 +551,50 @@ class AdventureController(private val context: Context) {
 
     fun startVoice(fromAutoWindow: Boolean = false) {
         if (voice?.isListening == true) return
-        autoCapture = fromAutoWindow
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _state.update { it.copy(voice = VoiceState.Failed("no speech recogniser on this device")) }
             return
         }
-        // The detector owns the microphone while narrating; hand it over before listening.
+        autoCapture = fromAutoWindow
+        val request = ++windowRequest
+        // The detector owns the microphone while narrating. Ask the service to let go, then wait
+        // until it actually has: a recogniser built too early just records silence.
         NarrationService.openVoiceWindow(context, VOICE_WINDOW_MS)
-        val capture = VoiceCapture(clock = { android.os.SystemClock.elapsedRealtime() })
+        awaitMicrophone(request, fromAutoWindow)
+    }
+
+    /** Poll until the detector has released the microphone, then start the recogniser. */
+    private fun awaitMicrophone(request: Int, fromAutoWindow: Boolean) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val poll = object : Runnable {
+            override fun run() {
+                // A newer request (or stopVoice) supersedes this one: never start a stale window.
+                if (request != windowRequest) return
+                val elapsed = SystemClock.elapsedRealtime() - startedAt
+                when (MicHandoff.evaluate(HarnessState.state.value.micOwner, elapsed)) {
+                    MicHandoff.WAITING -> main.postDelayed(this, MicHandoff.POLL_MS)
+                    MicHandoff.RELEASED -> {
+                        HarnessState.log("mic: detector released after ${elapsed}ms - recogniser starting")
+                        beginCapture(fromAutoWindow)
+                    }
+                    MicHandoff.TIMED_OUT -> {
+                        // Nothing released it in time — most likely no detector is running at all.
+                        // Say so and try anyway; a recogniser error still closes the window safely.
+                        HarnessState.log(
+                            "mic: no detector release after ${MicHandoff.DEFAULT_TIMEOUT_MS}ms - starting anyway",
+                        )
+                        beginCapture(fromAutoWindow)
+                    }
+                }
+            }
+        }
+        main.post(poll)
+    }
+
+    private fun beginCapture(fromAutoWindow: Boolean) {
+        if (voice?.isListening == true) return
+        autoCapture = fromAutoWindow
+        val capture = VoiceCapture(clock = { SystemClock.elapsedRealtime() })
         voice = capture
         _state.update { it.copy(voice = capture.start()) }
 
@@ -574,6 +661,8 @@ class AdventureController(private val context: Context) {
     }
 
     fun stopVoice() {
+        // Cancel any pending handoff so a poll cannot start a recogniser after this call.
+        windowRequest += 1
         recognizer?.let { runCatching { it.stopListening() }; runCatching { it.destroy() } }
         recognizer = null
         voice?.reset()

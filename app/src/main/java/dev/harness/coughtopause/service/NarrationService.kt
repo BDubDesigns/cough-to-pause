@@ -330,6 +330,10 @@ class NarrationService : Service() {
                     setDetectorWanted(false)
                 }
             }
+            // Published last, on the microphone thread: by the time the adventure screen sees
+            // ADVENTURE_ASR the detector's AudioRecord is really stopped, so its recogniser gets
+            // the device rather than a silent race.
+            HarnessState.update { it.copy(micOwner = owner) }
         }
     }
 

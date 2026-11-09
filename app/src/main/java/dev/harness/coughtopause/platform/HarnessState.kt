@@ -74,6 +74,12 @@ data class UiState(
     val calibration: CalibrationResult? = null,
     val battery: BatteryView = BatteryView(),
     val micStatus: String = "stopped",
+    /**
+     * Who holds the microphone right now, published by the service *after* the change landed on
+     * its microphone thread. The adventure screen waits for ADVENTURE_ASR before constructing a
+     * recogniser, instead of racing the detector for the device.
+     */
+    val micOwner: dev.harness.coughtopause.adventure.MicOwner = dev.harness.coughtopause.adventure.MicOwner.NONE,
     val capture: String = "no capture yet",
     val captureWindows: Long = 0,
     val nearMisses: List<String> = emptyList(),
