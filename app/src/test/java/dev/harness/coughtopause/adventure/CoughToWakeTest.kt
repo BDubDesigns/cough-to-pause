@@ -23,8 +23,9 @@ import java.io.File
 /**
  * Cough-to-wake: the whole hands-free recovery loop, as rules rather than as a phone session.
  *
- * Ten transitions, one test each. Everything here is deterministic — the microphone itself is
- * measured on the device (docs/playtest.md) and never claimed by these tests.
+ * Ten transitions, one test each, plus the paused-vs-completed distinction. Everything here is
+ * deterministic — the microphone itself is measured on the device (docs/playtest.md) and never
+ * claimed by these tests.
  */
 class CoughToWakeTest {
 
@@ -259,17 +260,22 @@ class CoughToWakeTest {
         assertEquals(
             "the detector still holds it: keep waiting",
             MicHandoff.WAITING,
-            MicHandoff.evaluate(MicOwner.DETECTOR, elapsedMs = 200L),
+            MicHandoff.evaluate(MicOwner.DETECTOR, serialServed = true, elapsedMs = 200L),
         )
         assertEquals(
             "the detector released it: the recogniser may start",
             MicHandoff.RELEASED,
-            MicHandoff.evaluate(MicOwner.ADVENTURE_ASR, elapsedMs = 240L),
+            MicHandoff.evaluate(MicOwner.ADVENTURE_ASR, serialServed = true, elapsedMs = 240L),
+        )
+        assertEquals(
+            "a leftover ADVENTURE_ASR from the previous window is not a release for this request",
+            MicHandoff.WAITING,
+            MicHandoff.evaluate(MicOwner.ADVENTURE_ASR, serialServed = false, elapsedMs = 40L),
         )
         assertEquals(
             "no release in time: start anyway and log it",
             MicHandoff.TIMED_OUT,
-            MicHandoff.evaluate(MicOwner.DETECTOR, elapsedMs = MicHandoff.DEFAULT_TIMEOUT_MS),
+            MicHandoff.evaluate(MicOwner.ADVENTURE_ASR, serialServed = false, elapsedMs = MicHandoff.DEFAULT_TIMEOUT_MS),
         )
 
         // However the window ended — result, error or timeout — the detector returns.
@@ -278,6 +284,41 @@ class CoughToWakeTest {
         mic.openAdventureWindow()
         assertEquals(MicOwner.DETECTOR, mic.closeAdventureWindow(PlaybackStatus.COMPLETED))
         assertFalse(mic.isWindowOpen)
+    }
+
+    // 11. Paused and completed are different states: the same cough means different things.
+    @Test
+    fun pausedAndCompletedAreDistinctStates() {
+        val policy = CoughWakePolicy()
+
+        assertFalse(
+            "a cough while paused only pauses; it must not open a gameplay window",
+            policy.onCough(1_000L, 1_000L, true, PlaybackStatus.PAUSED, SCENE, windowOpen = false),
+        )
+        assertFalse(
+            "and it still does nothing later in the pause, not just inside the cooldown",
+            policy.onCough(50_000L, 50_000L, true, PlaybackStatus.PAUSED, SCENE, windowOpen = false),
+        )
+        assertTrue(
+            "the identical cough once narration has completed is the wake gesture",
+            policy.onCough(60_000L, 60_000L, true, PlaybackStatus.COMPLETED, SCENE, windowOpen = false),
+        )
+
+        // The button follows the same distinction: resume a line, or repeat a finished prompt.
+        assertEquals(ReplayAction.RESUME, ReplayPolicy.decide(PlaybackStatus.PAUSED, hasLastScene = true))
+        assertEquals(ReplayAction.REPLAY, ReplayPolicy.decide(PlaybackStatus.COMPLETED, hasLastScene = true))
+
+        // ...and so does what the player sees, so resume is never hidden behind a "Repeat" label.
+        assertEquals("Resume", ReplayPolicy.buttonLabel(PlaybackStatus.PAUSED))
+        assertEquals("Repeat", ReplayPolicy.buttonLabel(PlaybackStatus.COMPLETED))
+        assertTrue(
+            "the paused state explains how to get back",
+            ReplayPolicy.pausedHint(PlaybackStatus.PAUSED)?.contains("say \"Play\"") == true,
+        )
+        assertFalse(
+            "and no paused explanation is shown once Andy has finished",
+            ReplayPolicy.pausedHint(PlaybackStatus.COMPLETED) != null,
+        )
     }
 
     private companion object {

@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.harness.coughtopause.adventure.AdventureSnapshot
 import dev.harness.coughtopause.adventure.AdventureUiState
+import dev.harness.coughtopause.adventure.ReplayPolicy
 import dev.harness.coughtopause.adventure.VoiceState
 import dev.harness.coughtopause.core.PlaybackStatus
 import dev.harness.coughtopause.platform.UiState
@@ -121,7 +122,7 @@ fun AdventureScreen(
                     }
                 }
             }
-            ActionCard(adventure, onAct, onSpeak, onStopVoice, onNarrateAgain)
+            ActionCard(adventure, harness.narration.status, onAct, onSpeak, onStopVoice, onNarrateAgain)
             AutoListenCard(adventure.autoListen, onAutoListenChange)
             TranscriptCard(snapshot)
         }
@@ -230,6 +231,7 @@ private fun CharacterCard(snapshot: AdventureSnapshot) {
 @Composable
 private fun ActionCard(
     adventure: AdventureUiState,
+    status: PlaybackStatus,
     onAct: (String) -> Unit,
     onSpeak: () -> Unit,
     onStopVoice: () -> Unit,
@@ -237,6 +239,8 @@ private fun ActionCard(
 ) {
     var text by remember { mutableStateOf("") }
     val listening = adventure.voice == VoiceState.Listening
+    // Paused and finished are different states: the same button resumes a line while paused and
+    // replays the saved prompt once Andy has finished. Coughing again while paused does nothing.
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -260,7 +264,14 @@ private fun ActionCard(
                 OutlinedButton(onClick = if (listening) onStopVoice else onSpeak) {
                     Text(if (listening) "Stop" else "Speak")
                 }
-                OutlinedButton(onClick = onNarrateAgain) { Text("Repeat") }
+                OutlinedButton(onClick = onNarrateAgain) { Text(ReplayPolicy.buttonLabel(status)) }
+            }
+            ReplayPolicy.pausedHint(status)?.let { hint ->
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text(
                 when (val v = adventure.voice) {

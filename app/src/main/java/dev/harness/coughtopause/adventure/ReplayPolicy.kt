@@ -24,4 +24,16 @@ object ReplayPolicy {
         status == PlaybackStatus.COMPLETED && hasLastScene -> ReplayAction.REPLAY
         else -> ReplayAction.IGNORE
     }
+
+    /** The button under the text field: it resumes while paused, repeats once Andy has finished. */
+    fun buttonLabel(status: PlaybackStatus): String =
+        if (status == PlaybackStatus.PAUSED) "Resume" else "Repeat"
+
+    /** Shown while paused so the way back is visible, not just spoken. Null when not paused. */
+    fun pausedHint(status: PlaybackStatus): String? = when {
+        status == PlaybackStatus.PAUSED ->
+            "Paused — say \"Play\" or tap Resume. Coughing again while paused does nothing; " +
+                "a cough only opens a listening window once Andy has finished."
+        else -> null
+    }
 }

@@ -107,6 +107,14 @@ class AdventureController(private val context: Context) {
     /** Identifies the current window request, so a superseded handoff can never start a recogniser. */
     private var windowRequest = 0
 
+    /**
+     * A window has been requested from the service but the recogniser has not started yet.
+     * Without this, a cough or a duplicate completion callback landing in the ~300 ms handoff
+     * would look like "no window open" and ask for a second one.
+     */
+    @Volatile
+    private var windowPending = false
+
     // ---------------------------------------------------------------- campaign lifecycle
 
     fun restore() {
@@ -467,7 +475,7 @@ class AdventureController(private val context: Context) {
             status = status,
             scriptId = scriptId,
             generation = generation,
-            alreadyListening = voice?.isListening == true,
+            alreadyListening = windowPending || voice?.isListening == true,
         )
         if (listen) {
             _state.update { it.copy(message = "Listening — say \"Andy, …\" to answer, or ignore it.") }
@@ -487,7 +495,7 @@ class AdventureController(private val context: Context) {
             inAdventure = inAdventure,
             status = status,
             scriptId = scriptId,
-            windowOpen = voice?.isListening == true,
+            windowOpen = windowPending || voice?.isListening == true,
         )
         if (!wake) return
         _state.update { it.copy(message = "Cough heard - listening. Say \"Andy, ...\".") }
@@ -550,28 +558,38 @@ class AdventureController(private val context: Context) {
     // ---------------------------------------------------------------- voice input
 
     fun startVoice(fromAutoWindow: Boolean = false) {
-        if (voice?.isListening == true) return
+        if (windowPending || voice?.isListening == true) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _state.update { it.copy(voice = VoiceState.Failed("no speech recogniser on this device")) }
             return
         }
         autoCapture = fromAutoWindow
         val request = ++windowRequest
+        windowPending = true
         // The detector owns the microphone while narrating. Ask the service to let go, then wait
         // until it actually has: a recogniser built too early just records silence.
+        val serialBefore = HarnessState.state.value.micWindowSerial
         NarrationService.openVoiceWindow(context, VOICE_WINDOW_MS)
-        awaitMicrophone(request, fromAutoWindow)
+        awaitMicrophone(request, fromAutoWindow, serialBefore)
     }
 
     /** Poll until the detector has released the microphone, then start the recogniser. */
-    private fun awaitMicrophone(request: Int, fromAutoWindow: Boolean) {
+    private fun awaitMicrophone(request: Int, fromAutoWindow: Boolean, serialBefore: Long) {
         val startedAt = SystemClock.elapsedRealtime()
         val poll = object : Runnable {
             override fun run() {
                 // A newer request (or stopVoice) supersedes this one: never start a stale window.
                 if (request != windowRequest) return
                 val elapsed = SystemClock.elapsedRealtime() - startedAt
-                when (MicHandoff.evaluate(HarnessState.state.value.micOwner, elapsed)) {
+                val state = HarnessState.state.value
+                val handoff = MicHandoff.evaluate(
+                    owner = state.micOwner,
+                    // Served *and* released: the serial rules out a stale owner from a previous
+                    // window, which would otherwise look like an instant release.
+                    serialServed = state.micWindowSerial > serialBefore,
+                    elapsedMs = elapsed,
+                )
+                when (handoff) {
                     MicHandoff.WAITING -> main.postDelayed(this, MicHandoff.POLL_MS)
                     MicHandoff.RELEASED -> {
                         HarnessState.log("mic: detector released after ${elapsed}ms - recogniser starting")
@@ -593,6 +611,7 @@ class AdventureController(private val context: Context) {
 
     private fun beginCapture(fromAutoWindow: Boolean) {
         if (voice?.isListening == true) return
+        windowPending = false
         autoCapture = fromAutoWindow
         val capture = VoiceCapture(clock = { SystemClock.elapsedRealtime() })
         voice = capture
@@ -663,6 +682,7 @@ class AdventureController(private val context: Context) {
     fun stopVoice() {
         // Cancel any pending handoff so a poll cannot start a recogniser after this call.
         windowRequest += 1
+        windowPending = false
         recognizer?.let { runCatching { it.stopListening() }; runCatching { it.destroy() } }
         recognizer = null
         voice?.reset()

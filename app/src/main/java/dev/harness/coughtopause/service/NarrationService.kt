@@ -344,6 +344,9 @@ class NarrationService : Service() {
      * grants capture to one client at a time. The window is bounded and always closes.
      */
     private fun openVoiceWindow(durationMs: Int) {
+        // Bumped before the handoff: the adventure screen waits for this serial and only then
+        // treats the owner as released, so a leftover ADVENTURE_ASR cannot be mistaken for it.
+        HarnessState.update { it.copy(micWindowSerial = it.micWindowSerial + 1) }
         val owner = micOwnership.openAdventureWindow()
         applyOwner(owner)
         handler.removeCallbacks(closeWindowRunnable)

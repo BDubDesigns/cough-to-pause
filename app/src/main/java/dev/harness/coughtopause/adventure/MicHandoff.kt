@@ -6,6 +6,10 @@ package dev.harness.coughtopause.adventure
  * Asking the service to open the window is asynchronous, so constructing a SpeechRecognizer
  * straight afterwards races the detector for the microphone and records silence. The screen polls
  * this instead of guessing a delay, and recovers either way.
+ *
+ * Both conditions matter: the owner must be ADVENTURE_ASR *and* the request must have been served
+ * ([serialServed]). Otherwise the owner left over from the previous window reads as a release and
+ * the recogniser starts while the detector is still being restarted.
  */
 enum class MicHandoff {
     /** The service has not finished releasing the detector yet. Keep waiting. */
@@ -24,11 +28,15 @@ enum class MicHandoff {
         /** How long to wait between polls while a handoff is pending. */
         const val POLL_MS = 40L
 
-        fun evaluate(owner: MicOwner, elapsedMs: Long, timeoutMs: Long = DEFAULT_TIMEOUT_MS): MicHandoff =
-            when {
-                owner == MicOwner.ADVENTURE_ASR -> RELEASED
-                elapsedMs >= timeoutMs -> TIMED_OUT
-                else -> WAITING
-            }
+        fun evaluate(
+            owner: MicOwner,
+            serialServed: Boolean,
+            elapsedMs: Long,
+            timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        ): MicHandoff = when {
+            serialServed && owner == MicOwner.ADVENTURE_ASR -> RELEASED
+            elapsedMs >= timeoutMs -> TIMED_OUT
+            else -> WAITING
+        }
     }
 }

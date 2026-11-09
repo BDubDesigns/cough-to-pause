@@ -87,6 +87,10 @@ phone. Open the Adventure screen (cough-to-wake is scoped to it; the M0 harness 
 Record for each run: how many coughs were needed per wake, any window that opened while narration
 was still speaking, and whether a cough during a window restarted the recogniser (it must not).
 
+Paused is a separate state and must stay separate: while paused the button reads **Resume** and the
+card says "say Play or tap Resume". Coughing again while paused must change nothing — no resume, no
+window. Only `COMPLETED` makes a cough open a window.
+
 ## Recording
 
 Per run, copy these from Diagnostics into `docs/measurements.md`:
