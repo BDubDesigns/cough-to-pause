@@ -31,12 +31,14 @@ interface NarrativeProvider {
         campaign: Campaign,
         events: List<GameEvent>,
         preferLocationFirst: Boolean,
+        /** False when the room was already described: narrate the result only. */
+        includePlace: Boolean = true,
     ): List<String>? {
         val location = campaign.world.locations[campaign.currentLocationId]
         val npcs = campaign.world.npcs.values.filter { it.locationId == campaign.currentLocationId }
         val exits = location?.connections.orEmpty().mapNotNull { campaign.world.locations[it]?.name }
         val outcome = describeOutcome(campaign, events).orEmpty()
-        val place = location?.let { describeLocation(it, npcs, exits) }.orEmpty()
+        val place = if (includePlace) location?.let { describeLocation(it, npcs, exits) }.orEmpty() else emptyList()
         return (if (preferLocationFirst) place + outcome else outcome + place)
             .filter { it.isNotBlank() }
     }
@@ -78,7 +80,12 @@ class DeterministicNarrator : NarrativeProvider {
                     lines += "$dice: ${roll.outcome.name.lowercase().replace('_', ' ')}. (${roll.skill.value})"
                 }
                 is EventPayload.SkillXp ->
-                    lines += "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP, level ${payload.levelBefore} to ${payload.levelAfter}."
+                    lines += if (payload.levelAfter == payload.levelBefore) {
+                        "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP."
+                    } else {
+                        "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP, level " +
+                            "${payload.levelBefore} to ${payload.levelAfter}."
+                    }
                 is EventPayload.Travelled -> {
                     val name = campaign.world.locations[payload.to]?.name ?: payload.to.value
                     lines += "You make your way to $name."
@@ -150,8 +157,10 @@ object NarrationScriptBuilder {
         preferLocationFirst: Boolean,
         /** Extra spoken lines that are not events, e.g. a fact an NPC has just confirmed. */
         extraLines: List<String> = emptyList(),
+        /** False when the room was already described: narrate only what changed. */
+        includePlace: Boolean = true,
     ): List<dev.harness.coughtopause.core.ScriptLine> {
-        val texts = (narrator.narrateScene(campaign, events, preferLocationFirst).orEmpty() + extraLines)
+        val texts = (narrator.narrateScene(campaign, events, preferLocationFirst, includePlace).orEmpty() + extraLines)
             .filter { it.isNotBlank() }
             .take(MAX_LINES)
 

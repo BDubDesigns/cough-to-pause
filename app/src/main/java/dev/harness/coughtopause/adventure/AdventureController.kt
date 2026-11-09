@@ -198,7 +198,7 @@ class AdventureController(private val context: Context) {
                             transcript.clear()
                             transcript += "${character.value.name} the ${backgroundId.value.replace('_', ' ')} arrives."
                             publish()
-                            narrate(emptyList(), preferLocationFirst = true)
+                            narrate(emptyList(), preferLocationFirst = true, describePlace = true)
                         }
                         is CreateCampaignResult.Rejected ->
                             _state.update { it.copy(busy = false, message = "World rejected: ${created.errors.first()}") }
@@ -243,7 +243,7 @@ class AdventureController(private val context: Context) {
                 is AdventureIntent.Look -> {
                     transcript += "You look around."
                     publish()
-                    narrate(emptyList(), preferLocationFirst = true)
+                    narrate(emptyList(), preferLocationFirst = true, describePlace = true)
                 }
                 is AdventureIntent.Help -> {
                     transcript += "Try: look · go to <place> · talk to <name> · climb/search/persuade/read …"
@@ -330,21 +330,22 @@ class AdventureController(private val context: Context) {
     }
 
     private fun submit(current: Campaign, command: GameCommand) {
-        handle(engine.submit(current.id, command), current)
+        // Arriving somewhere is the one outcome that has to describe the new room.
+        handle(engine.submit(current.id, command), current, describePlace = command is Travel)
     }
 
-    private fun handle(result: Submission, current: Campaign) {
+    private fun handle(result: Submission, current: Campaign, describePlace: Boolean = false) {
         when (result) {
             is Submission.Committed -> {
                 campaign = engine.load(current.id) ?: current
                 transcript += "The world answers."
                 publish()
-                narrate(result.events, preferLocationFirst = false)
+                narrate(result.events, preferLocationFirst = false, describePlace = describePlace)
             }
             is Submission.Replayed -> {
                 transcript += "(already applied — replaying the same outcome)"
                 publish()
-                narrate(result.events, preferLocationFirst = false)
+                narrate(result.events, preferLocationFirst = false, describePlace = describePlace)
             }
             is Submission.Rejected -> {
                 transcript += "Refused: ${result.errors.joinToString("; ") { it.toString() }}"
@@ -382,10 +383,14 @@ class AdventureController(private val context: Context) {
         }
         if (current.world.facts.any { it.text == topic.fact }) {
             // The fallback region already seeds some of these facts. A player who asks anyway
-            // should hear what they know, not be told to go away.
-            transcript += "${npc.name} confirms: ${topic.fact}"
+            // hears them again — and is told why there is no die to roll.
+            transcript += "${npc.name} confirms: ${topic.fact} (already known — no roll needed)"
             publish()
-            narrate(emptyList(), preferLocationFirst = false, extraLines = listOf(topic.fact))
+            narrate(
+                emptyList(),
+                preferLocationFirst = false,
+                extraLines = listOf(topic.fact, "You already knew this, so there is nothing to roll."),
+            )
             return
         }
 
@@ -433,9 +438,11 @@ class AdventureController(private val context: Context) {
         events: List<dev.harness.coughtopause.rpg.GameEvent>,
         preferLocationFirst: Boolean,
         extraLines: List<String> = emptyList(),
+        /** Only when the room is news: arriving somewhere, or the player asked to look. */
+        describePlace: Boolean = false,
     ) {
         val current = campaign ?: return
-        var lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst, extraLines)
+        var lines = NarrationScriptBuilder.build(current, events, narrator, preferLocationFirst, extraLines, describePlace)
         if (lines.isEmpty() && narrator.id == "llm") {
             // The model failed: say so once, then narrate deterministically rather than going silent.
             val reason = (narrator as? LlmNarrator)?.lastError ?: "unavailable"
@@ -447,6 +454,7 @@ class AdventureController(private val context: Context) {
                 DeterministicNarrator(),
                 preferLocationFirst,
                 extraLines,
+                describePlace,
             )
         }
         if (lines.isEmpty()) {
@@ -600,7 +608,7 @@ class AdventureController(private val context: Context) {
         if (lastScene.isEmpty()) {
             // Nothing has been narrated in this session yet (fresh launch after restore): speak the
             // current scene instead. Still narration only — no command is submitted.
-            narrate(emptyList(), preferLocationFirst = true)
+            narrate(emptyList(), preferLocationFirst = true, describePlace = true)
             return
         }
         // A fresh scene id: the service reloads the script (new narration generation), so the

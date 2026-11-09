@@ -149,7 +149,42 @@ class IntentInterpreter {
 
     private fun findNpc(text: String, world: WorldView): NpcView? =
         world.npcs.firstOrNull { it.name.isNotBlank() && text.contains(normalise(it.name)) }
+            // A near-miss the player would call a typo: "mara" for "marta". One edit, long words only.
+            ?: world.npcs.firstOrNull { npc ->
+                npc.name.isNotBlank() && words(text).any { word -> closeTo(word, normalise(npc.name)) }
+            }
             ?: world.npcs.singleOrNull()
+
+    private fun words(text: String): List<String> = text.split(' ').filter { it.length >= 4 }
+
+    private fun closeTo(word: String, name: String): Boolean =
+        editDistanceAtMostOne(word, name.substringBefore(' ')) || editDistanceAtMostOne(word, name)
+
+    /** True when [a] and [b] differ by at most one insert, delete or substitution. */
+    private fun editDistanceAtMostOne(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+        var i = 0
+        var j = 0
+        var edits = 0
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) {
+                i++
+                j++
+                continue
+            }
+            if (++edits > 1) return false
+            when {
+                a.length > b.length -> i++
+                b.length > a.length -> j++
+                else -> {
+                    i++
+                    j++
+                }
+            }
+        }
+        return edits + (a.length - i) + (b.length - j) <= 1
+    }
 
     private fun normalise(input: String): String = input.lowercase()
         .replace(Regex("[^a-z0-9 ]"), " ")
