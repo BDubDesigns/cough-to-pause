@@ -9,6 +9,7 @@ import dev.harness.coughtopause.rpg.Backgrounds
 import dev.harness.coughtopause.rpg.Campaign
 import dev.harness.coughtopause.rpg.CampaignId
 import dev.harness.coughtopause.rpg.CharacterFactory
+import dev.harness.coughtopause.rpg.ContentCatalog
 import dev.harness.coughtopause.rpg.CreateCampaignResult
 import dev.harness.coughtopause.rpg.CreationError
 import dev.harness.coughtopause.rpg.FileCampaignStore
@@ -91,6 +92,9 @@ class AdventureEngine(
     private val processor = ActionProcessor(store, clock = clock)
     private val factory = CharacterFactory()
 
+    /** The catalogue the rules run with; names and item mechanics are read from here, never hard-coded. */
+    private val catalog = ContentCatalog.STARTER
+
     fun rollAttributes(seed: Long): RolledAttributeSet = AttributeRoller().roll(SplitMix64(seed))
 
     /**
@@ -133,7 +137,7 @@ class AdventureEngine(
 
     /** True when this carried item can be used up to restore something. */
     fun carriedHeals(item: ItemTemplateId): Boolean =
-        (dev.harness.coughtopause.rpg.ContentCatalog.STARTER.item(item)?.healsHp ?: 0) > 0
+        (catalog.item(item)?.healsHp ?: 0) > 0
 
     fun snapshot(campaign: Campaign, transcript: List<String>, narrationSource: String): AdventureSnapshot {
         val location = campaign.world.locations[campaign.currentLocationId]
@@ -185,6 +189,9 @@ class AdventureEngine(
                 it.abbreviation to campaign.player.attributes[it]
             },
             skills = listOf(
+                // Combat pays XP to the skill that felled the enemy.
+                SkillCatalog.MELEE,
+                SkillCatalog.MAGIC,
                 SkillCatalog.PERSUASION,
                 SkillCatalog.PERCEPTION,
                 SkillCatalog.ATHLETICS,
@@ -199,8 +206,7 @@ class AdventureEngine(
                 EncounterView(
                     enemies = enc.enemies.map { enemy ->
                         EnemyView(
-                            name = dev.harness.coughtopause.rpg.ContentCatalog.STARTER
-                                .creature(enemy.template)?.name ?: enemy.template.value,
+                            name = catalog.creature(enemy.template)?.name ?: enemy.template.value,
                             hp = enemy.hp,
                             maxHp = enemy.maxHp,
                         )

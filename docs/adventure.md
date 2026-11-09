@@ -138,8 +138,11 @@ so a scripted line is never presented as generated prose.
 
 ## What is deliberately missing
 
-Combat, encounters, gold spending, items, crafting, housing, level-up UI, multiple regions, and any
-AI call. `StartEncounter` and `SpendGold` exist in the engine but are not wired to input.
+Gold spending (inn rest), crafting, housing, level-up UI, multiple regions and AI world generation.
+`SpendGold` exists in the engine but is not wired to input. Combat is playable (`attack`, `defend`,
+`cast ember bolt`, `cast identify` / `identify`, `drink a draught`, `retreat`; rules in
+[rpg-domain.md](rpg-domain.md#encounters-and-combat)). A refused action is spoken as well as
+written, so a locked-screen player hears why nothing happened and the response window reopens.
 
 ## Try it on the Pixel
 
@@ -151,7 +154,7 @@ AI call. `StartEncounter` and `SpendGold` exist in the engine but are not wired 
 
 ## Test coverage added by this slice
 
-`./scripts/build.sh :app:testDebugUnitTest` — 72 tests, including:
+`./scripts/build.sh :app:testDebugUnitTest` — 147 tests, including:
 
 - `AdventureEngineTest` — character → fallback world → check resolved → **replay** of the same action
   id returns the original events and changes nothing → reload from a fresh engine sees the same state.

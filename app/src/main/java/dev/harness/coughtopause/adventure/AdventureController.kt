@@ -246,7 +246,8 @@ class AdventureController(private val context: Context) {
                     narrate(emptyList(), preferLocationFirst = true, describePlace = true)
                 }
                 is AdventureIntent.Help -> {
-                    transcript += "Try: look · go to <place> · talk to <name> · climb/search/persuade/read …"
+                    transcript += "Try: look · go to <place> · talk to <name> · climb/search/persuade/read … · " +
+                        "attack · defend · cast ember bolt · cast identify · drink a draught · retreat"
                     publish()
                 }
                 // "Andy, repeat" and "Play" re-speak the saved prompt; nothing is submitted here.
@@ -257,8 +258,7 @@ class AdventureController(private val context: Context) {
                     } else {
                         val here = current.world.locations.getValue(current.currentLocationId)
                         if (here.creatures.isEmpty()) {
-                            transcript += "Nothing here wants a fight."
-                            publish()
+                            say("Nothing here wants a fight.")
                         } else {
                             // Opening move: start the fight, then the next "attack" swings.
                             submit(
@@ -273,11 +273,9 @@ class AdventureController(private val context: Context) {
                     val spellId = intent.spell ?: SpellCatalog.EMBER_BOLT
                     val spell = SpellCatalog.byId(spellId)
                     if (spell == null) {
-                        transcript += "You do not know that spell."
-                        publish()
+                        say("You do not know that spell.")
                     } else if (current.encounter?.status != EncounterStatus.ACTIVE && spell.kind == SpellKind.DAMAGE) {
-                        transcript += "There is nothing to cast at."
-                        publish()
+                        say("There is nothing to cast at.")
                     } else {
                         submit(current, GameCommand.Cast(engine.newActionId(), spell.id, null))
                     }
@@ -286,8 +284,7 @@ class AdventureController(private val context: Context) {
                     val item = intent.item ?: current.player.inventory.keys
                         .firstOrNull { engine.carriedHeals(it) }
                     if (item == null) {
-                        transcript += "You are not carrying anything to use."
-                        publish()
+                        say("You are not carrying anything to use.")
                     } else {
                         submit(current, GameCommand.UseItem(engine.newActionId(), item))
                     }
@@ -321,10 +318,8 @@ class AdventureController(private val context: Context) {
                         ),
                     ),
                 )
-                is AdventureIntent.Unknown -> {
-                    transcript += "I did not understand that. Try \"look\", \"go to the inn\", or \"search the room\"."
-                    publish()
-                }
+                is AdventureIntent.Unknown ->
+                    say("I did not understand that. Try \"look\", \"go to the inn\", or \"search the room\".")
             }
         }
     }
@@ -348,9 +343,13 @@ class AdventureController(private val context: Context) {
                 narrate(result.events, preferLocationFirst = false, describePlace = describePlace)
             }
             is Submission.Rejected -> {
-                transcript += "Refused: ${result.errors.joinToString("; ") { it.toString() }}"
+                // Said aloud as well as written: on a locked screen a silent refusal would leave the
+                // player waiting, and no response window would open after it.
+                val reason = result.errors.joinToString("; ") { it.message }
+                transcript += "Refused: $reason"
                 _state.update { it.copy(busy = false) }
                 publish()
+                speakLines(listOf("You can't do that: $reason."))
             }
             is Submission.Unavailable -> {
                 _state.update { it.copy(busy = false, message = result.reason) }
@@ -426,9 +425,12 @@ class AdventureController(private val context: Context) {
                 )
                 campaign = engine.load(current.id) ?: current
                 transcript += "${npc.name} tells you: ${topic.fact}"
-                val events = result.events + (commit as? Submission.Committed)?.events.orEmpty()
+                val committed = commit as? Submission.Committed
+                val events = result.events + committed?.events.orEmpty()
                 publish()
-                narrate(events, preferLocationFirst = false, extraLines = listOf(topic.fact))
+                // A committed fact is already in the events, and both narrators speak it from there;
+                // adding it again as an extra line made Andy say it twice.
+                narrate(events, preferLocationFirst = false, extraLines = if (committed != null) emptyList() else listOf(topic.fact))
             }
             else -> handle(result, current)
         }
@@ -598,6 +600,13 @@ class AdventureController(private val context: Context) {
      * Speak lines that are not a scene description (talking to someone): the room is not re-read,
      * and the scene id still starts with `rpg-`, so the contextual window opens when Andy finishes.
      */
+    /** A one-line answer that changes nothing: written to the journal and spoken, never submitted. */
+    private fun say(line: String) {
+        transcript += line
+        publish()
+        speakLines(listOf(line))
+    }
+
     private fun speakLines(lines: List<String>) {
         if (lines.isEmpty()) return
         lastScene = lines

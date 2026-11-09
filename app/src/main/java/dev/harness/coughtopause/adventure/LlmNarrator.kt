@@ -1,10 +1,11 @@
 package dev.harness.coughtopause.adventure
 
 import dev.harness.coughtopause.rpg.Campaign
-import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameEvent
 import dev.harness.coughtopause.rpg.Location
 import dev.harness.coughtopause.rpg.Npc
+import dev.harness.coughtopause.rpg.OutcomeFact
+import dev.harness.coughtopause.rpg.OutcomeFacts
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -64,7 +65,8 @@ object PromptBuilder {
     fun systemPrompt(): String = """
         You are Andy, the dungeon master of a small fantasy adventure.
         Narrate only what the engine reports. Never invent dice results, difficulty numbers,
-        items, gold, HP changes, new characters or new world facts.
+        items, gold, HP changes, new characters or new world facts. Who hit, who missed, who fell
+        and what was found are exactly as listed in the engine results; never add or change one.
         Reply with 2 to 4 short sentences, one per line, plain text, no markdown, no lists,
         no quotation marks around the whole reply. Second person, present tense.
     """.trimIndent()
@@ -108,36 +110,65 @@ object PromptBuilder {
         }
     }
 
-    /** Factual one-liners from committed events; the model may phrase them, not alter them. */
-    fun eventFacts(campaign: Campaign, events: List<GameEvent>): List<String> {
-        val facts = mutableListOf<String>()
-        for (event in events) {
-            when (val payload = event.payload) {
-                is EventPayload.CheckResolved -> {
-                    val roll = payload.roll
-                    val dice = if (roll.natural != null) {
-                        "rolled ${roll.natural}, total ${roll.total} against DC ${roll.difficultyClass}"
-                    } else {
-                        "no roll was needed"
-                    }
-                    facts += "${roll.skill.value} check: $dice, outcome ${roll.outcome.name.lowercase()}."
-                }
-                is EventPayload.SkillXp ->
-                    facts += if (payload.levelAfter == payload.levelBefore) {
-                        "${payload.skill.value} gained ${payload.amount} XP."
-                    } else {
-                        "${payload.skill.value} gained ${payload.amount} XP (level ${payload.levelBefore} to ${payload.levelAfter})."
-                    }
-                is EventPayload.Travelled ->
-                    facts += "Travelled to ${campaign.world.locations[payload.to]?.name ?: payload.to.value}."
-                is EventPayload.GoldSpent ->
-                    facts += "Spent ${payload.amount} gold on ${payload.purpose}."
-                is EventPayload.EncounterStarted ->
-                    facts += "An encounter started."
-                else -> Unit
+    /**
+     * Factual one-liners from committed events; the model may phrase them, not alter them.
+     *
+     * Built from the same [OutcomeFacts] the scripted narrator speaks, so every mechanical result —
+     * checks, attacks, enemy swings and misses, damage, spells, Identify entries, items, loot, XP,
+     * defeat and recovery — reaches the model exactly as the engine committed it. A model told only
+     * "an encounter started" would have to invent who hit whom; with these facts it never needs to.
+     */
+    fun eventFacts(campaign: Campaign, events: List<GameEvent>): List<String> =
+        OutcomeFacts.from(campaign, events).map(::factLine)
+
+    fun factLine(fact: OutcomeFact): String = when (fact) {
+        is OutcomeFact.CheckRolled -> {
+            val dice = if (fact.natural != null) {
+                "rolled ${fact.natural}, total ${fact.total} against DC ${fact.dc}"
+            } else {
+                "no roll was needed"
             }
+            "${fact.skill} check (${fact.intent}): $dice, outcome ${fact.outcome.name.lowercase()}."
         }
-        return facts
+        is OutcomeFact.AttackRolled ->
+            "Player attacked ${fact.target}: rolled ${fact.natural}, total ${fact.total} against defense " +
+                "${fact.defense}, ${if (fact.hit) "hit" else "miss"}."
+        is OutcomeFact.EnemyHurt ->
+            "${fact.target} took ${fact.amount} damage from the player's ${if (fact.bySpell) "spell" else "weapon"}; " +
+                if (fact.felled) "it is defeated." else "${fact.hpAfter} HP left."
+        is OutcomeFact.EnemyAttacked ->
+            "${fact.attacker} attacked the player: rolled ${fact.natural}, total ${fact.total} against defense " +
+                "${fact.defense}, ${if (fact.hit) "hit" else "miss"}."
+        is OutcomeFact.PlayerHurt -> "Player took ${fact.amount} damage from ${fact.attacker}; ${fact.hpAfter} HP left."
+        is OutcomeFact.Guarded -> "Player defended: +${fact.bonus} defense this round."
+        is OutcomeFact.SpellCast ->
+            "Player cast ${fact.spell}" + (fact.target?.let { " at $it" } ?: "") + "; ${fact.mpAfter} mana left."
+        is OutcomeFact.CreatureIdentified ->
+            "Identify on ${fact.creature} (${if (fact.learned) "new entry, ${fact.mpAfter} mana left" else "already known, free"}): " +
+                "level ${fact.level} ${fact.threat.name.lowercase()}, ${fact.maxHp} max HP, possible drops: " +
+                (fact.possibleDrops.joinToString { "${it.item} ${it.chancePercent}%" }.ifEmpty { "none" }) + "."
+        is OutcomeFact.ItemUsed -> "Player used ${fact.item}; ${fact.hpAfter} HP now, ${fact.remaining} left."
+        is OutcomeFact.FightStarted ->
+            "A fight started against " + fact.enemies.joinToString { "${it.name} (${it.hp}/${it.maxHp} HP)" } + "."
+        is OutcomeFact.FightEnded -> {
+            val loot = buildList {
+                if (fact.gold > 0) add("${fact.gold} gold")
+                fact.loot.forEach { (name, count) -> add("$name x$count") }
+            }
+            "Fight ended: ${fact.status.name.lowercase()}. Loot: ${loot.joinToString().ifEmpty { "none" }}."
+        }
+        is OutcomeFact.Recovered ->
+            "Player was defeated and woke at ${fact.location} with ${fact.hp} HP, ${fact.goldLost} gold lost."
+        is OutcomeFact.XpGained ->
+            if (fact.levelAfter == fact.levelBefore) {
+                "${fact.skill} gained ${fact.amount} XP."
+            } else {
+                "${fact.skill} gained ${fact.amount} XP (level ${fact.levelBefore} to ${fact.levelAfter})."
+            }
+        is OutcomeFact.XpWithheld -> "${fact.skill} gained no XP (${fact.reason.name.lowercase().replace('_', ' ')})."
+        is OutcomeFact.Travelled -> "Travelled to ${fact.destination}."
+        is OutcomeFact.GoldSpent -> "Spent ${fact.amount} gold on ${fact.purpose}; ${fact.balanceAfter} gold left."
+        is OutcomeFact.FactLearned -> "Learned (committed world fact): ${fact.text}"
     }
 
     fun requestJson(config: AiConfig, system: String, user: String): String = JSONObject().apply {

@@ -22,9 +22,12 @@ Clear the key field and save to go back to scripted narration.
 
 ## What is sent
 
-One small request per narrated beat: the player's name, background, HP and gold, the current
+One small request per narrated beat: the player's name, background, HP, mana and gold, the current
 location and its description, the NPCs present, the exits, and the engine's factual results for that
-beat (rolls, XP, travel, spending). Plus the system prompt that forbids inventing mechanics.
+beat. Those results come from `OutcomeFacts`, the same list the scripted narrator speaks: checks and
+attack rolls, every enemy swing (hit or miss), damage and remaining HP, spells and mana, Identify
+entries, items used, loot, XP, travel, spending, revealed facts, defeat and recovery. Plus the system
+prompt that forbids inventing mechanics or changing who hit, missed, fell or found what.
 
 Not sent: microphone audio, the event log, saved campaigns, or anything from the M0 harness.
 

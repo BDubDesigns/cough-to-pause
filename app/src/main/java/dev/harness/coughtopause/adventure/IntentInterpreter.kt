@@ -85,6 +85,7 @@ class IntentInterpreter {
         // Combat verbs, checked before skills so "attack the goblin" is not a check.
         if (FIGHT.any { text == it || text.startsWith("$it ") }) {
             return when {
+                text.startsWith("identify") -> AdventureIntent.Cast(SpellCatalog.IDENTIFY)
                 text.startsWith("cast") -> AdventureIntent.Cast(
                     when {
                         text.contains("identify") -> SpellCatalog.IDENTIFY
@@ -197,7 +198,10 @@ class IntentInterpreter {
 
         /** After narration completes, these ask Andy to say it again rather than to act. */
         /** Openers that mean combat, so they win over the skill keywords below. */
-        val FIGHT = listOf("attack", "fight", "strike", "hit", "defend", "block", "guard", "cast", "use", "drink", "retreat", "flee", "run away")
+        val FIGHT = listOf(
+            "attack", "fight", "strike", "hit", "defend", "block", "guard", "cast", "identify", "use", "drink",
+            "retreat", "flee", "run away",
+        )
 
         val REPEAT_EXACT = listOf(
             "repeat",
