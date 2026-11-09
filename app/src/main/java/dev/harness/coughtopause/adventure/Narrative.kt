@@ -107,10 +107,12 @@ class DeterministicNarrator : NarrativeProvider {
                     }
                 }
                 is EventPayload.Defended -> lines += "You raise your guard (+${payload.bonus} defense until your next action)."
-                is EventPayload.SpellCast -> lines += "You cast ${payload.spell.value.replace('_', ' ')}; ${payload.mpAfter} MP left."
+                is EventPayload.SpellCast -> {
+                    lines += "You cast ${payload.spell.value.replace('_', ' ')}; ${payload.mpAfter} mana points left."
+                }
                 is EventPayload.CreatureIdentified -> {
                     lines += if (payload.learned) {
-                        "You study it: the entry is yours now. ${payload.mpAfter} MP left."
+                        "You study it: the entry is yours now. ${payload.mpAfter} mana points left."
                     } else {
                         "You already know this one."
                     }

@@ -258,7 +258,7 @@ private fun CharacterCard(snapshot: AdventureSnapshot) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("${snapshot.characterName} · ${snapshot.background}", style = MaterialTheme.typography.titleMedium)
             Text(
-                "HP ${snapshot.hp}/${snapshot.maxHp} · MP ${snapshot.mp}/${snapshot.maxMp} · ${snapshot.gold} gold",
+                "HP ${snapshot.hp}/${snapshot.maxHp} · mana ${snapshot.mp}/${snapshot.maxMp} · ${snapshot.gold} gold",
                 style = TelemetryStyle,
             )
             Text(

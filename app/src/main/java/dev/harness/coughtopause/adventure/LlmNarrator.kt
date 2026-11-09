@@ -83,6 +83,7 @@ object PromptBuilder {
         return buildString {
             appendLine("Player: ${campaign.player.name}, ${campaign.player.background.value.replace('_', ' ')}.")
             appendLine("HP ${campaign.player.vitals.hp}/${campaign.player.vitals.maxHp}, ${campaign.player.gold} gold.")
+            appendLine("Mana ${campaign.player.vitals.mp}/${campaign.player.vitals.maxMp}.")
             if (includePlace) {
                 appendLine("Location: ${location?.name ?: "unknown"}. ${location?.description.orEmpty()}")
                 if (npcs.isNotEmpty()) {

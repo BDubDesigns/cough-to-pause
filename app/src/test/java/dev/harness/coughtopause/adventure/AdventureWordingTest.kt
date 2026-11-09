@@ -5,11 +5,13 @@ import dev.harness.coughtopause.rpg.Backgrounds
 import dev.harness.coughtopause.rpg.Campaign
 import dev.harness.coughtopause.rpg.CampaignId
 import dev.harness.coughtopause.rpg.CreateCampaignResult
+import dev.harness.coughtopause.rpg.CreatureTemplateId
 import dev.harness.coughtopause.rpg.EventId
 import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameEvent
 import dev.harness.coughtopause.rpg.NpcId
 import dev.harness.coughtopause.rpg.SkillCatalog
+import dev.harness.coughtopause.rpg.SpellCatalog
 import dev.harness.coughtopause.rpg.Validated
 import dev.harness.coughtopause.rpg.XpReason
 import org.junit.Assert.assertEquals
@@ -86,6 +88,23 @@ class AdventureWordingTest {
             "a real level-up is still announced",
             narrator.describeOutcome(campaign, listOf(event(levelUp)))!!.single().contains("level 1 to 2"),
         )
+    }
+
+    // ---------------------------------------------------------------- spoken units
+
+    @Test
+    fun spokenLinesNeverSayAnInitialismThePhoneMisreads() {
+        val narrator = DeterministicNarrator()
+        val campaign = campaign(engine())
+        val cast = EventPayload.SpellCast(SpellCatalog.EMBER_BOLT, null, mpAfter = 1)
+        val identified = EventPayload.CreatureIdentified(CreatureTemplateId("goblin"), learned = true, mpAfter = 2)
+        val damage = EventPayload.DamageDealt("e1", "player", 3, 9, targetIsPlayer = true)
+
+        val lines = narrator.describeOutcome(campaign, listOf(event(cast), event(identified), event(damage)))!!
+        // TTS read "MP" as letters, which the player heard as "megapixels".
+        assertFalse("no bare 'MP' in spoken text", lines.any { it.contains("MP") })
+        assertTrue("mana is spoken as mana points", lines.any { it.contains("mana points left") })
+        assertTrue("hit points are already spelled out", lines.any { it.contains("hit points left") })
     }
 
     // ---------------------------------------------------------------- names
