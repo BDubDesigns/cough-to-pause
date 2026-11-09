@@ -74,6 +74,26 @@ data class UiState(
     val calibration: CalibrationResult? = null,
     val battery: BatteryView = BatteryView(),
     val micStatus: String = "stopped",
+    /**
+     * Who holds the microphone right now, published by the service *after* the change landed on
+     * its microphone thread. The adventure screen waits for ADVENTURE_ASR before constructing a
+     * recogniser, instead of racing the detector for the device.
+     */
+    val micOwner: dev.harness.coughtopause.adventure.MicOwner = dev.harness.coughtopause.adventure.MicOwner.NONE,
+
+    /**
+     * Bumped by the service each time it serves a window request. A waiter uses this instead of
+     * trusting [micOwner]: a stale ADVENTURE_ASR from the previous window is not proof that the
+     * detector released the microphone for *this* one.
+     */
+    val micWindowSerial: Long = 0,
+
+    /**
+     * Adventure mode as the *service* understands it: set by enterAdventure/enterHarness.
+     * The hands-free loop reads this instead of the Activity's current screen, so it keeps
+     * working when the Activity is stopped or the screen is locked.
+     */
+    val adventureMode: Boolean = false,
     val capture: String = "no capture yet",
     val captureWindows: Long = 0,
     val nearMisses: List<String> = emptyList(),

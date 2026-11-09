@@ -330,6 +330,10 @@ class NarrationService : Service() {
                     setDetectorWanted(false)
                 }
             }
+            // Published last, on the microphone thread: by the time the adventure screen sees
+            // ADVENTURE_ASR the detector's AudioRecord is really stopped, so its recogniser gets
+            // the device rather than a silent race.
+            HarnessState.update { it.copy(micOwner = owner) }
         }
     }
 
@@ -340,6 +344,9 @@ class NarrationService : Service() {
      * grants capture to one client at a time. The window is bounded and always closes.
      */
     private fun openVoiceWindow(durationMs: Int) {
+        // Bumped before the handoff: the adventure screen waits for this serial and only then
+        // treats the owner as released, so a leftover ADVENTURE_ASR cannot be mistaken for it.
+        HarnessState.update { it.copy(micWindowSerial = it.micWindowSerial + 1) }
         val owner = micOwnership.openAdventureWindow()
         applyOwner(owner)
         handler.removeCallbacks(closeWindowRunnable)
@@ -455,6 +462,7 @@ class NarrationService : Service() {
         if (intent == null) return
         when (val action = intent.action) {
             ACTION_ENTER_ADVENTURE -> {
+                HarnessState.update { it.copy(adventureMode = true) }
                 // Leaving the harness must not leave its checkpoint behind: otherwise "Play"
                 // resumes the M0 test dialogue while the player is in the adventure.
                 if (controller.snapshot().scriptId == NarrationScript.SCRIPT_ID) {
@@ -465,12 +473,14 @@ class NarrationService : Service() {
                 }
             }
             ACTION_ENTER_HARNESS -> {
+                HarnessState.update { it.copy(adventureMode = false) }
                 if (controller.snapshot().scriptId != NarrationScript.SCRIPT_ID) {
                     execute(controller.loadScript(NarrationScript.SCRIPT_ID, NarrationScript.LINES))
                 }
                 HarnessState.log("mode: harness")
             }
             ACTION_QUIT -> {
+                HarnessState.update { it.copy(adventureMode = false) }
                 HarnessState.log("quit: stopping narration and service")
                 quitting = true
                 execute(controller.stop(CommandSource.UI))
