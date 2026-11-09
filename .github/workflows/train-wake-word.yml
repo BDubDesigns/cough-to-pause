@@ -15,7 +15,7 @@ jobs:
       - name: Install
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install --no-cache-dir "tensorflow-cpu==2.19.0" "onnx==1.17.0" "onnxruntime==1.18.1" "onnx2tf==1.26.3" "openwakeword" "piper-tts" "numpy<2" "ml_dtypes>=0.4.1" "tf_keras>=2.19"
+          pip install --no-cache-dir "tensorflow-cpu==2.19.0" "onnx==1.17.0" "onnxruntime==1.18.1" "onnx2tf==1.26.3" "openwakeword" "piper-tts" "numpy<2" "ml_dtypes>=0.4.1" "tf_keras>=2.19" onnx_graphsurgeon onnxsim sng4onnx onnxruntime-extensions
       - name: Environment report
         env: { TF_USE_LEGACY_KERAS: "1" }
         run: python -c "import openwakeword, tensorflow as tf, onnx2tf, sys; print('ok', openwakeword.__version__, tf.__version__, sys.version)"
