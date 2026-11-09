@@ -14,6 +14,7 @@ import dev.harness.coughtopause.rpg.CreationError
 import dev.harness.coughtopause.rpg.FileCampaignStore
 import dev.harness.coughtopause.rpg.FallbackRegion
 import dev.harness.coughtopause.rpg.GameCommand
+import dev.harness.coughtopause.rpg.ItemTemplateId
 import dev.harness.coughtopause.rpg.LoadResult
 import dev.harness.coughtopause.rpg.PlayerCharacter
 import dev.harness.coughtopause.rpg.RolledAttributeSet
@@ -22,6 +23,8 @@ import dev.harness.coughtopause.rpg.SplitMix64
 import dev.harness.coughtopause.rpg.Submission
 import dev.harness.coughtopause.rpg.Validated
 import java.io.File
+
+data class NpcPrompt(val name: String, val role: String, val topics: List<String>)
 
 /** One resolved roll, as the UI shows it. */
 data class RollView(
@@ -42,6 +45,8 @@ data class AdventureSnapshot(
     val locationName: String,
     val locationDescription: String,
     val npcs: List<String>,
+    /** Who is here and what they will discuss, so a topic list is visible without guessing. */
+    val npcPrompts: List<NpcPrompt> = emptyList(),
     val exits: List<String>,
     val hp: Int,
     val maxHp: Int,
@@ -53,9 +58,21 @@ data class AdventureSnapshot(
     /** Every roll in the campaign, newest first. The audit trail the review asked for. */
     val rolls: List<RollView>,
     val lastRoll: RollView?,
+    /** The fight in progress (or the one that just ended), for the combat card. */
+    val encounter: EncounterView? = null,
     val transcript: List<String>,
     val narrationSource: String,
 )
+
+data class EncounterView(
+    val enemies: List<EnemyView>,
+    val round: Int,
+    val status: String,
+    val playerGuard: Int,
+    val identified: List<String>,
+)
+
+data class EnemyView(val name: String, val hp: Int, val maxHp: Int)
 
 /**
  * Thin adapter over the authoritative `:rpg` engine.
@@ -114,6 +131,10 @@ class AdventureEngine(
 
     fun newActionId(): ActionId = ActionId("a-${clock()}-${(0..9999).random()}")
 
+    /** True when this carried item can be used up to restore something. */
+    fun carriedHeals(item: ItemTemplateId): Boolean =
+        (dev.harness.coughtopause.rpg.ContentCatalog.STARTER.item(item)?.healsHp ?: 0) > 0
+
     fun snapshot(campaign: Campaign, transcript: List<String>, narrationSource: String): AdventureSnapshot {
         val location = campaign.world.locations[campaign.currentLocationId]
         val npcsHere = campaign.world.npcs.values
@@ -145,6 +166,15 @@ class AdventureEngine(
             locationName = location?.name ?: "unknown",
             locationDescription = location?.description.orEmpty(),
             npcs = npcsHere,
+            npcPrompts = campaign.world.npcs.values
+                .filter { it.locationId == campaign.currentLocationId }
+                .map { npc ->
+                    NpcPrompt(
+                        name = npc.name,
+                        role = npc.role,
+                        topics = dev.harness.coughtopause.adventure.NpcTopics.forNpc(npc).map { it.label },
+                    )
+                },
             exits = exits,
             hp = campaign.player.vitals.hp,
             maxHp = campaign.player.vitals.maxHp,
@@ -165,6 +195,22 @@ class AdventureEngine(
             },
             rolls = allRolls,
             lastRoll = lastRoll,
+            encounter = campaign.encounter?.let { enc ->
+                EncounterView(
+                    enemies = enc.enemies.map { enemy ->
+                        EnemyView(
+                            name = dev.harness.coughtopause.rpg.ContentCatalog.STARTER
+                                .creature(enemy.template)?.name ?: enemy.template.value,
+                            hp = enemy.hp,
+                            maxHp = enemy.maxHp,
+                        )
+                    },
+                    round = enc.round,
+                    status = enc.status.name.lowercase(),
+                    playerGuard = enc.playerGuard,
+                    identified = campaign.identified.map { it.value },
+                )
+            },
             transcript = transcript.takeLast(40),
             narrationSource = narrationSource,
         )

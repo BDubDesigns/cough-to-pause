@@ -1,6 +1,7 @@
 package dev.harness.coughtopause.adventure
 
 import dev.harness.coughtopause.rpg.Campaign
+import dev.harness.coughtopause.rpg.EncounterStatus
 import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameEvent
 import dev.harness.coughtopause.rpg.Location
@@ -30,12 +31,14 @@ interface NarrativeProvider {
         campaign: Campaign,
         events: List<GameEvent>,
         preferLocationFirst: Boolean,
+        /** False when the room was already described: narrate the result only. */
+        includePlace: Boolean = true,
     ): List<String>? {
         val location = campaign.world.locations[campaign.currentLocationId]
         val npcs = campaign.world.npcs.values.filter { it.locationId == campaign.currentLocationId }
         val exits = location?.connections.orEmpty().mapNotNull { campaign.world.locations[it]?.name }
         val outcome = describeOutcome(campaign, events).orEmpty()
-        val place = location?.let { describeLocation(it, npcs, exits) }.orEmpty()
+        val place = if (includePlace) location?.let { describeLocation(it, npcs, exits) }.orEmpty() else emptyList()
         return (if (preferLocationFirst) place + outcome else outcome + place)
             .filter { it.isNotBlank() }
     }
@@ -77,7 +80,12 @@ class DeterministicNarrator : NarrativeProvider {
                     lines += "$dice: ${roll.outcome.name.lowercase().replace('_', ' ')}. (${roll.skill.value})"
                 }
                 is EventPayload.SkillXp ->
-                    lines += "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP, level ${payload.levelBefore} to ${payload.levelAfter}."
+                    lines += if (payload.levelAfter == payload.levelBefore) {
+                        "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP."
+                    } else {
+                        "${payload.skill.value.replace('_', ' ')} improves: +${payload.amount} XP, level " +
+                            "${payload.levelBefore} to ${payload.levelAfter}."
+                    }
                 is EventPayload.Travelled -> {
                     val name = campaign.world.locations[payload.to]?.name ?: payload.to.value
                     lines += "You make your way to $name."
@@ -88,7 +96,43 @@ class DeterministicNarrator : NarrativeProvider {
                     campaign.world.facts.firstOrNull { it.id == factId }?.let { lines += it.text }
                 }
                 is EventPayload.EncounterStarted ->
-                    lines += "Something hostile is here (combat is not part of this slice)."
+                    lines += "Something hostile is here: " +
+                        payload.enemies.joinToString { "${it.template.value.replace('_', ' ')} (${it.hp} HP)" } +
+                        ". Attack, defend, cast, or retreat."
+                is EventPayload.DamageDealt -> {
+                    if (payload.targetIsPlayer) {
+                        lines += "You are hit for ${payload.amount}; ${payload.hpAfter} hit points left."
+                    } else {
+                        lines += "Your blow lands for ${payload.amount}; it has ${payload.hpAfter} left."
+                    }
+                }
+                is EventPayload.Defended -> lines += "You raise your guard (+${payload.bonus} defense until your next action)."
+                is EventPayload.SpellCast -> {
+                    lines += "You cast ${payload.spell.value.replace('_', ' ')}; ${payload.mpAfter} mana points left."
+                }
+                is EventPayload.CreatureIdentified -> {
+                    lines += if (payload.learned) {
+                        "You study it: the entry is yours now. ${payload.mpAfter} mana points left."
+                    } else {
+                        "You already know this one."
+                    }
+                }
+                is EventPayload.ItemUsed -> lines += "You use it: ${payload.hpAfter} hit points now."
+                is EventPayload.EncounterEnded -> {
+                    lines += when (payload.status) {
+                        EncounterStatus.VICTORY -> "The fight is over, and you are standing."
+                        EncounterStatus.RETREATED -> "You get out alive."
+                        else -> "The fight ends."
+                    }
+                    if (payload.gold > 0) lines += "You find ${payload.gold} gold."
+                    if (payload.items.isNotEmpty()) {
+                        lines += "You take " + payload.items.groupingBy { it.value.replace('_', ' ') }
+                            .eachCount().entries.joinToString { (name, count) -> if (count > 1) "$count ${name}s" else name } + "."
+                    }
+                }
+                is EventPayload.Recovered ->
+                    lines += "You wake at ${campaign.world.locations[payload.location]?.name ?: "somewhere safe"} " +
+                        "with ${payload.hp} hit points, ${payload.goldLost} gold lighter. The save is intact."
                 else -> Unit
             }
         }
@@ -115,8 +159,10 @@ object NarrationScriptBuilder {
         preferLocationFirst: Boolean,
         /** Extra spoken lines that are not events, e.g. a fact an NPC has just confirmed. */
         extraLines: List<String> = emptyList(),
+        /** False when the room was already described: narrate only what changed. */
+        includePlace: Boolean = true,
     ): List<dev.harness.coughtopause.core.ScriptLine> {
-        val texts = (narrator.narrateScene(campaign, events, preferLocationFirst).orEmpty() + extraLines)
+        val texts = (narrator.narrateScene(campaign, events, preferLocationFirst, includePlace).orEmpty() + extraLines)
             .filter { it.isNotBlank() }
             .take(MAX_LINES)
 

@@ -44,4 +44,36 @@ sealed interface EventPayload {
     data class Travelled(val from: LocationId, val to: LocationId) : EventPayload
 
     data class EncounterStarted(val encounterId: EncounterId, val enemies: List<CreatureInstance>) : EventPayload
+
+    /** One landed blow, either direction. [hpAfter] is the defender's remaining hit points. */
+    data class DamageDealt(
+        val attackerId: String,
+        val targetId: String,
+        val amount: Int,
+        val hpAfter: Int,
+        val targetIsPlayer: Boolean,
+    ) : EventPayload
+
+    data class Defended(val bonus: Int) : EventPayload
+
+    data class SpellCast(val spell: SpellId, val targetId: String?, val mpAfter: Int) : EventPayload
+
+    /** Identify: [learned] false means the entry was already known, so it cost nothing. */
+    data class CreatureIdentified(
+        val template: CreatureTemplateId,
+        val learned: Boolean,
+        val mpAfter: Int,
+    ) : EventPayload
+
+    data class ItemUsed(val item: ItemTemplateId, val hpAfter: Int, val remaining: Int) : EventPayload
+
+    /** End of a fight. Loot is granted here and only here, once per encounter. */
+    data class EncounterEnded(
+        val status: EncounterStatus,
+        val gold: Int = 0,
+        val items: List<ItemTemplateId> = emptyList(),
+    ) : EventPayload
+
+    /** Bounded defeat consequence: a safe location, restored HP, and the gold that was lost. */
+    data class Recovered(val location: LocationId, val hp: Int, val goldLost: Int) : EventPayload
 }

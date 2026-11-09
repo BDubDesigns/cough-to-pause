@@ -50,6 +50,8 @@ value class ActionId(val value: String) {
 
 @JvmInline value class EncounterId(val value: String) { override fun toString(): String = value }
 
+@JvmInline value class SpellId(val value: String) { override fun toString(): String = value }
+
 internal val SAFE_ID = Regex("[a-z0-9][a-z0-9_-]{0,63}")
 
 /** Every rule violation is a typed value with a human-readable message, never an exception. */

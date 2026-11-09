@@ -1,10 +1,14 @@
 package dev.harness.coughtopause.adventure
 
+import dev.harness.coughtopause.rpg.ContentCatalog
 import dev.harness.coughtopause.rpg.DifficultyTier
+import dev.harness.coughtopause.rpg.ItemTemplateId
 import dev.harness.coughtopause.rpg.LocationId
 import dev.harness.coughtopause.rpg.NpcId
 import dev.harness.coughtopause.rpg.SkillCatalog
 import dev.harness.coughtopause.rpg.SkillId
+import dev.harness.coughtopause.rpg.SpellCatalog
+import dev.harness.coughtopause.rpg.SpellId
 
 /** What the player asked for, before any rules are involved. */
 sealed interface AdventureIntent {
@@ -23,6 +27,19 @@ sealed interface AdventureIntent {
     ) : AdventureIntent
 
     data object Help : AdventureIntent
+
+    /** Start or continue a fight with whatever lives here. */
+    data object Attack : AdventureIntent
+
+    data object Defend : AdventureIntent
+
+    /** Cast a catalogue spell; [spell] is null when the player did not name one. */
+    data class Cast(val spell: SpellId?) : AdventureIntent
+
+    /** Use a carried consumable; [item] is null when the player did not name one. */
+    data class Use(val item: ItemTemplateId?) : AdventureIntent
+
+    data object Retreat : AdventureIntent
 
     /**
      * "Andy, repeat" / "Play" after Andy finished: speak the last prompt again. Carries no ids on
@@ -65,6 +82,24 @@ class IntentInterpreter {
         }
         // Exact matches only: "play" is a repeat; "play the lute" is not a command this slice knows.
         if (REPEAT_EXACT.any { text == it }) return AdventureIntent.Repeat
+        // Combat verbs, checked before skills so "attack the goblin" is not a check.
+        if (FIGHT.any { text == it || text.startsWith("$it ") }) {
+            return when {
+                text.startsWith("cast") -> AdventureIntent.Cast(
+                    when {
+                        text.contains("identify") -> SpellCatalog.IDENTIFY
+                        text.contains("ember") || text.contains("bolt") -> SpellCatalog.EMBER_BOLT
+                        else -> null
+                    },
+                )
+                text.startsWith("use") || text.startsWith("drink") -> AdventureIntent.Use(
+                    if (text.contains("draught") || text.contains("potion")) ContentCatalog.HEALING_DRAUGHT else null,
+                )
+                text.startsWith("defend") || text.startsWith("block") || text.startsWith("guard") -> AdventureIntent.Defend
+                text.startsWith("retreat") || text.startsWith("flee") || text.startsWith("run away") -> AdventureIntent.Retreat
+                else -> AdventureIntent.Attack
+            }
+        }
         if (LOOK.any { text == it || text.startsWith("$it ") }) return AdventureIntent.Look
 
         // "ask <name> about <topic>" — checked before plain talk so the topic is not lost.
@@ -114,7 +149,42 @@ class IntentInterpreter {
 
     private fun findNpc(text: String, world: WorldView): NpcView? =
         world.npcs.firstOrNull { it.name.isNotBlank() && text.contains(normalise(it.name)) }
+            // A near-miss the player would call a typo: "mara" for "marta". One edit, long words only.
+            ?: world.npcs.firstOrNull { npc ->
+                npc.name.isNotBlank() && words(text).any { word -> closeTo(word, normalise(npc.name)) }
+            }
             ?: world.npcs.singleOrNull()
+
+    private fun words(text: String): List<String> = text.split(' ').filter { it.length >= 4 }
+
+    private fun closeTo(word: String, name: String): Boolean =
+        editDistanceAtMostOne(word, name.substringBefore(' ')) || editDistanceAtMostOne(word, name)
+
+    /** True when [a] and [b] differ by at most one insert, delete or substitution. */
+    private fun editDistanceAtMostOne(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+        var i = 0
+        var j = 0
+        var edits = 0
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) {
+                i++
+                j++
+                continue
+            }
+            if (++edits > 1) return false
+            when {
+                a.length > b.length -> i++
+                b.length > a.length -> j++
+                else -> {
+                    i++
+                    j++
+                }
+            }
+        }
+        return edits + (a.length - i) + (b.length - j) <= 1
+    }
 
     private fun normalise(input: String): String = input.lowercase()
         .replace(Regex("[^a-z0-9 ]"), " ")
@@ -126,6 +196,9 @@ class IntentInterpreter {
         val TALK = listOf("talk", "speak", "ask", "greet", "chat")
 
         /** After narration completes, these ask Andy to say it again rather than to act. */
+        /** Openers that mean combat, so they win over the skill keywords below. */
+        val FIGHT = listOf("attack", "fight", "strike", "hit", "defend", "block", "guard", "cast", "use", "drink", "retreat", "flee", "run away")
+
         val REPEAT_EXACT = listOf(
             "repeat",
             "repeat that",

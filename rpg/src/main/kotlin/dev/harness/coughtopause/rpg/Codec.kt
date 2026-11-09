@@ -39,6 +39,7 @@ object CampaignCodec {
         put("player", player(c.player))
         put("world", world(c.world))
         put("encounter", c.encounter?.let { encounter(it) } ?: JSONObject.NULL)
+        put("identified", JSONArray(c.identified.map { it.value }))
         put("xpLedger", array(c.xpLedger.entries) { (k, v) ->
             JSONObject().put("skill", k.skill.value).put("subject", k.subjectId).put("topic", k.topic).put("xp", v)
         })
@@ -108,6 +109,7 @@ object CampaignCodec {
         .put("turnActor", e.turn.actor)
         .put("awaitingPlayerDecision", e.turn.awaitingPlayerDecision)
         .put("status", e.status.name)
+        .put("playerGuard", e.playerGuard)
 
     private fun creature(c: CreatureInstance) = JSONObject()
         .put("id", c.id).put("template", c.template.value).put("hp", c.hp).put("maxHp", c.maxHp)
@@ -135,6 +137,21 @@ object CampaignCodec {
         is EventPayload.Travelled -> JSONObject().put("type", "Travelled").put("from", p.from.value).put("to", p.to.value)
         is EventPayload.EncounterStarted -> JSONObject().put("type", "EncounterStarted")
             .put("encounterId", p.encounterId.value).put("enemies", array(p.enemies) { creature(it) })
+        is EventPayload.DamageDealt -> JSONObject().put("type", "DamageDealt")
+            .put("attackerId", p.attackerId).put("targetId", p.targetId).put("amount", p.amount)
+            .put("hpAfter", p.hpAfter).put("targetIsPlayer", p.targetIsPlayer)
+        is EventPayload.Defended -> JSONObject().put("type", "Defended").put("bonus", p.bonus)
+        is EventPayload.SpellCast -> JSONObject().put("type", "SpellCast")
+            .put("spell", p.spell.value).put("targetId", p.targetId ?: JSONObject.NULL).put("mpAfter", p.mpAfter)
+        is EventPayload.CreatureIdentified -> JSONObject().put("type", "CreatureIdentified")
+            .put("template", p.template.value).put("learned", p.learned).put("mpAfter", p.mpAfter)
+        is EventPayload.ItemUsed -> JSONObject().put("type", "ItemUsed")
+            .put("item", p.item.value).put("hpAfter", p.hpAfter).put("remaining", p.remaining)
+        is EventPayload.EncounterEnded -> JSONObject().put("type", "EncounterEnded")
+            .put("status", p.status.name).put("gold", p.gold)
+            .put("items", JSONArray(p.items.map { it.value }))
+        is EventPayload.Recovered -> JSONObject().put("type", "Recovered")
+            .put("location", p.location.value).put("hp", p.hp).put("goldLost", p.goldLost)
     }
 
     private fun roll(r: RollRecord) = JSONObject()
@@ -181,6 +198,12 @@ object CampaignCodec {
             )
         },
         events = o.getJSONArray("events").objects().map { event(it) },
+        // Absent in campaigns written before combat: an empty set reads back fine.
+        identified = if (o.has("identified")) {
+            o.getJSONArray("identified").strings().map(::CreatureTemplateId).toSet()
+        } else {
+            emptySet()
+        },
     ).also { validateIntegrity(it) }
 
     /** Cross-references that a hand-edited or truncated file could break. */
@@ -233,6 +256,7 @@ object CampaignCodec {
         round = o.getInt("round"),
         turn = TurnState(o.getString("turnActor"), o.getBoolean("awaitingPlayerDecision")),
         status = EncounterStatus.valueOf(o.getString("status")),
+        playerGuard = if (o.has("playerGuard")) o.getInt("playerGuard") else 0,
     )
 
     private fun creature(o: JSONObject) =
@@ -264,6 +288,28 @@ object CampaignCodec {
         "Travelled" -> EventPayload.Travelled(LocationId(o.getString("from")), LocationId(o.getString("to")))
         "EncounterStarted" -> EventPayload.EncounterStarted(
             EncounterId(o.getString("encounterId")), o.getJSONArray("enemies").objects().map { creature(it) },
+        )
+        "DamageDealt" -> EventPayload.DamageDealt(
+            o.getString("attackerId"), o.getString("targetId"), o.getInt("amount"),
+            o.getInt("hpAfter"), o.getBoolean("targetIsPlayer"),
+        )
+        "Defended" -> EventPayload.Defended(o.getInt("bonus"))
+        "SpellCast" -> EventPayload.SpellCast(
+            SpellId(o.getString("spell")), if (o.isNull("targetId")) null else o.getString("targetId"),
+            o.getInt("mpAfter"),
+        )
+        "CreatureIdentified" -> EventPayload.CreatureIdentified(
+            CreatureTemplateId(o.getString("template")), o.getBoolean("learned"), o.getInt("mpAfter"),
+        )
+        "ItemUsed" -> EventPayload.ItemUsed(
+            ItemTemplateId(o.getString("item")), o.getInt("hpAfter"), o.getInt("remaining"),
+        )
+        "EncounterEnded" -> EventPayload.EncounterEnded(
+            EncounterStatus.valueOf(o.getString("status")), o.getInt("gold"),
+            o.getJSONArray("items").strings().map(::ItemTemplateId),
+        )
+        "Recovered" -> EventPayload.Recovered(
+            LocationId(o.getString("location")), o.getInt("hp"), o.getInt("goldLost"),
         )
         else -> throw IllegalArgumentException("unknown event type '$type'")
     }
@@ -307,6 +353,12 @@ object CommandCodec {
         is GameCommand.StartEncounter -> base("StartEncounter", command)
             .put("creatures", JSONArray(command.creatures.map { it.value }))
         is GameCommand.CommitWorldProposal -> base("CommitWorldProposal", command).put("proposal", proposal(command.proposal))
+        is GameCommand.Attack -> base("Attack", command).put("target", command.targetId ?: JSONObject.NULL)
+        is GameCommand.Defend -> base("Defend", command)
+        is GameCommand.Cast -> base("Cast", command)
+            .put("spell", command.spell.value).put("target", command.targetId ?: JSONObject.NULL)
+        is GameCommand.UseItem -> base("UseItem", command).put("item", command.item.value)
+        is GameCommand.Retreat -> base("Retreat", command)
     }
 
     private fun base(type: String, command: GameCommand) =

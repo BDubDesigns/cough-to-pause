@@ -170,6 +170,7 @@ data class BalanceConfig(
     val world: WorldLimits = WorldLimits(),
     /** Largest group StartEncounter accepts. */
     val maxEnemiesPerEncounter: Int = 4,
+    val combat: CombatRules = CombatRules(),
 ) {
     companion object {
         val DEFAULT = BalanceConfig()

@@ -69,7 +69,12 @@ object PromptBuilder {
         no quotation marks around the whole reply. Second person, present tense.
     """.trimIndent()
 
-    fun userPrompt(campaign: Campaign, events: List<GameEvent>, preferLocationFirst: Boolean): String {
+    fun userPrompt(
+        campaign: Campaign,
+        events: List<GameEvent>,
+        preferLocationFirst: Boolean,
+        includePlace: Boolean = true,
+    ): String {
         val location = campaign.world.locations[campaign.currentLocationId]
         val npcs = campaign.world.npcs.values.filter { it.locationId == campaign.currentLocationId }
         val exits = location?.connections.orEmpty().mapNotNull { campaign.world.locations[it]?.name }
@@ -78,20 +83,26 @@ object PromptBuilder {
         return buildString {
             appendLine("Player: ${campaign.player.name}, ${campaign.player.background.value.replace('_', ' ')}.")
             appendLine("HP ${campaign.player.vitals.hp}/${campaign.player.vitals.maxHp}, ${campaign.player.gold} gold.")
-            appendLine("Location: ${location?.name ?: "unknown"}. ${location?.description.orEmpty()}")
-            if (npcs.isNotEmpty()) {
-                appendLine("Present: " + npcs.joinToString("; ") { "${it.name}, ${it.role}. ${it.description}" })
+            appendLine("Mana ${campaign.player.vitals.mp}/${campaign.player.vitals.maxMp}.")
+            if (includePlace) {
+                appendLine("Location: ${location?.name ?: "unknown"}. ${location?.description.orEmpty()}")
+                if (npcs.isNotEmpty()) {
+                    appendLine("Present: " + npcs.joinToString("; ") { "${it.name}, ${it.role}. ${it.description}" })
+                }
+                if (exits.isNotEmpty()) appendLine("Exits: " + exits.joinToString(", "))
+            } else {
+                // The player has already seen the room: do not read it out again.
+                appendLine("Location: ${location?.name ?: "unknown"} (already described; do not describe it again).")
             }
-            if (exits.isNotEmpty()) appendLine("Exits: " + exits.joinToString(", "))
             if (facts.isNotEmpty()) {
                 appendLine("Engine results (authoritative, do not change):")
                 facts.forEach { appendLine("- $it") }
             }
             appendLine(
-                if (preferLocationFirst) {
-                    "Describe the place first, then the result."
-                } else {
-                    "Describe the result first, then the place if it matters."
+                when {
+                    !includePlace -> "Narrate only the result. Do not describe the room."
+                    preferLocationFirst -> "Describe the place first, then the result."
+                    else -> "Describe the result first, then the place if it matters."
                 },
             )
         }
@@ -112,7 +123,11 @@ object PromptBuilder {
                     facts += "${roll.skill.value} check: $dice, outcome ${roll.outcome.name.lowercase()}."
                 }
                 is EventPayload.SkillXp ->
-                    facts += "${payload.skill.value} gained ${payload.amount} XP (level ${payload.levelBefore} to ${payload.levelAfter})."
+                    facts += if (payload.levelAfter == payload.levelBefore) {
+                        "${payload.skill.value} gained ${payload.amount} XP."
+                    } else {
+                        "${payload.skill.value} gained ${payload.amount} XP (level ${payload.levelBefore} to ${payload.levelAfter})."
+                    }
                 is EventPayload.Travelled ->
                     facts += "Travelled to ${campaign.world.locations[payload.to]?.name ?: payload.to.value}."
                 is EventPayload.GoldSpent ->
@@ -192,10 +207,11 @@ class LlmNarrator(
         campaign: Campaign,
         events: List<GameEvent>,
         preferLocationFirst: Boolean,
+        includePlace: Boolean,
     ): List<String>? {
         val content = request(
             PromptBuilder.systemPrompt(),
-            PromptBuilder.userPrompt(campaign, events, preferLocationFirst),
+            PromptBuilder.userPrompt(campaign, events, preferLocationFirst, includePlace),
         ) ?: return null
         val lines = PromptBuilder.toLines(content)
         if (lines.isEmpty()) {
