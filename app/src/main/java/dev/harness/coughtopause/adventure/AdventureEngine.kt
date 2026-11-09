@@ -14,6 +14,7 @@ import dev.harness.coughtopause.rpg.CreationError
 import dev.harness.coughtopause.rpg.FileCampaignStore
 import dev.harness.coughtopause.rpg.FallbackRegion
 import dev.harness.coughtopause.rpg.GameCommand
+import dev.harness.coughtopause.rpg.ItemTemplateId
 import dev.harness.coughtopause.rpg.LoadResult
 import dev.harness.coughtopause.rpg.PlayerCharacter
 import dev.harness.coughtopause.rpg.RolledAttributeSet
@@ -53,9 +54,21 @@ data class AdventureSnapshot(
     /** Every roll in the campaign, newest first. The audit trail the review asked for. */
     val rolls: List<RollView>,
     val lastRoll: RollView?,
+    /** The fight in progress (or the one that just ended), for the combat card. */
+    val encounter: EncounterView? = null,
     val transcript: List<String>,
     val narrationSource: String,
 )
+
+data class EncounterView(
+    val enemies: List<EnemyView>,
+    val round: Int,
+    val status: String,
+    val playerGuard: Int,
+    val identified: List<String>,
+)
+
+data class EnemyView(val name: String, val hp: Int, val maxHp: Int)
 
 /**
  * Thin adapter over the authoritative `:rpg` engine.
@@ -114,6 +127,10 @@ class AdventureEngine(
 
     fun newActionId(): ActionId = ActionId("a-${clock()}-${(0..9999).random()}")
 
+    /** True when this carried item can be used up to restore something. */
+    fun carriedHeals(item: ItemTemplateId): Boolean =
+        (dev.harness.coughtopause.rpg.ContentCatalog.STARTER.item(item)?.healsHp ?: 0) > 0
+
     fun snapshot(campaign: Campaign, transcript: List<String>, narrationSource: String): AdventureSnapshot {
         val location = campaign.world.locations[campaign.currentLocationId]
         val npcsHere = campaign.world.npcs.values
@@ -165,6 +182,22 @@ class AdventureEngine(
             },
             rolls = allRolls,
             lastRoll = lastRoll,
+            encounter = campaign.encounter?.let { enc ->
+                EncounterView(
+                    enemies = enc.enemies.map { enemy ->
+                        EnemyView(
+                            name = dev.harness.coughtopause.rpg.ContentCatalog.STARTER
+                                .creature(enemy.template)?.name ?: enemy.template.value,
+                            hp = enemy.hp,
+                            maxHp = enemy.maxHp,
+                        )
+                    },
+                    round = enc.round,
+                    status = enc.status.name.lowercase(),
+                    playerGuard = enc.playerGuard,
+                    identified = campaign.identified.map { it.value },
+                )
+            },
             transcript = transcript.takeLast(40),
             narrationSource = narrationSource,
         )

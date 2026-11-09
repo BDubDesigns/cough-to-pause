@@ -1,6 +1,7 @@
 package dev.harness.coughtopause.adventure
 
 import dev.harness.coughtopause.rpg.Campaign
+import dev.harness.coughtopause.rpg.EncounterStatus
 import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameEvent
 import dev.harness.coughtopause.rpg.Location
@@ -88,7 +89,41 @@ class DeterministicNarrator : NarrativeProvider {
                     campaign.world.facts.firstOrNull { it.id == factId }?.let { lines += it.text }
                 }
                 is EventPayload.EncounterStarted ->
-                    lines += "Something hostile is here (combat is not part of this slice)."
+                    lines += "Something hostile is here: " +
+                        payload.enemies.joinToString { "${it.template.value.replace('_', ' ')} (${it.hp} HP)" } +
+                        ". Attack, defend, cast, or retreat."
+                is EventPayload.DamageDealt -> {
+                    if (payload.targetIsPlayer) {
+                        lines += "You are hit for ${payload.amount}; ${payload.hpAfter} hit points left."
+                    } else {
+                        lines += "Your blow lands for ${payload.amount}; it has ${payload.hpAfter} left."
+                    }
+                }
+                is EventPayload.Defended -> lines += "You raise your guard (+${payload.bonus} defense until your next action)."
+                is EventPayload.SpellCast -> lines += "You cast ${payload.spell.value.replace('_', ' ')}; ${payload.mpAfter} MP left."
+                is EventPayload.CreatureIdentified -> {
+                    lines += if (payload.learned) {
+                        "You study it: the entry is yours now. ${payload.mpAfter} MP left."
+                    } else {
+                        "You already know this one."
+                    }
+                }
+                is EventPayload.ItemUsed -> lines += "You use it: ${payload.hpAfter} hit points now."
+                is EventPayload.EncounterEnded -> {
+                    lines += when (payload.status) {
+                        EncounterStatus.VICTORY -> "The fight is over, and you are standing."
+                        EncounterStatus.RETREATED -> "You get out alive."
+                        else -> "The fight ends."
+                    }
+                    if (payload.gold > 0) lines += "You find ${payload.gold} gold."
+                    if (payload.items.isNotEmpty()) {
+                        lines += "You take " + payload.items.groupingBy { it.value.replace('_', ' ') }
+                            .eachCount().entries.joinToString { (name, count) -> if (count > 1) "$count ${name}s" else name } + "."
+                    }
+                }
+                is EventPayload.Recovered ->
+                    lines += "You wake at ${campaign.world.locations[payload.location]?.name ?: "somewhere safe"} " +
+                        "with ${payload.hp} hit points, ${payload.goldLost} gold lighter. The save is intact."
                 else -> Unit
             }
         }

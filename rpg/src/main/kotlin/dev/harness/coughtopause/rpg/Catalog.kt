@@ -69,10 +69,16 @@ data class CreatureTemplate(
 }
 
 /** The fixed, validated set of item and creature templates a campaign may reference. */
-class ContentCatalog(items: List<ItemTemplate>, creatures: List<CreatureTemplate>, checks: CheckRules = CheckRules()) {
+class ContentCatalog(
+    items: List<ItemTemplate>,
+    creatures: List<CreatureTemplate>,
+    checks: CheckRules = CheckRules(),
+    spells: List<SpellTemplate> = SpellCatalog.all,
+) {
 
     val items: Map<ItemTemplateId, ItemTemplate> = items.associateBy { it.id }
     val creatures: Map<CreatureTemplateId, CreatureTemplate> = creatures.associateBy { it.id }
+    val spells: Map<SpellId, SpellTemplate> = spells.associateBy { it.id }
 
     init {
         require(this.items.size == items.size) { "Duplicate item template id" }
@@ -91,8 +97,9 @@ class ContentCatalog(items: List<ItemTemplate>, creatures: List<CreatureTemplate
     }
 
     fun item(id: ItemTemplateId): ItemTemplate? = items[id]
-
     fun creature(id: CreatureTemplateId): CreatureTemplate? = creatures[id]
+
+    fun spell(id: SpellId): SpellTemplate? = spells[id]
 
     companion object {
         val SHORT_SWORD = ItemTemplateId("short_sword")

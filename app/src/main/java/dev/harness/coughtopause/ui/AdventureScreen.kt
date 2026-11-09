@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.harness.coughtopause.adventure.AdventureSnapshot
 import dev.harness.coughtopause.adventure.AdventureUiState
+import dev.harness.coughtopause.adventure.EncounterView
 import dev.harness.coughtopause.adventure.ReplayPolicy
 import dev.harness.coughtopause.adventure.VoiceState
 import dev.harness.coughtopause.core.PlaybackStatus
@@ -82,6 +83,7 @@ fun AdventureScreen(
             CharacterCreationCard(backgrounds, onBegin, onRestore, adventure.busy)
         } else {
             LocationCard(snapshot, harness)
+            snapshot.encounter?.let { CombatCard(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onNewAdventure) { Text("New adventure") }
                 OutlinedButton(onClick = onDeleteSaves) { Text("Delete saves") }
@@ -201,6 +203,36 @@ private fun LocationCard(snapshot: AdventureSnapshot, harness: UiState) {
                 style = TelemetryStyle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun CombatCard(encounter: EncounterView) {
+    val fighting = encounter.status == "active"
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (fighting) "Fighting" else "Fight over", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (fighting) "round ${encounter.round}" else encounter.status,
+                    style = TelemetryStyle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            encounter.enemies.forEach { enemy ->
+                Text(
+                    "${enemy.name}: ${enemy.hp} / ${enemy.maxHp} HP",
+                    style = TelemetryStyle,
+                    color = if (enemy.hp > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (encounter.playerGuard > 0) {
+                Text("guard +${encounter.playerGuard} · use: attack · defend · cast · drink · retreat", style = TelemetryStyle)
+            } else if (fighting) {
+                Text("Say: attack · defend · cast ember bolt · drink · retreat", style = TelemetryStyle)
+            }
         }
     }
 }

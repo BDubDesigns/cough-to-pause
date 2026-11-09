@@ -20,6 +20,21 @@ sealed interface GameCommand {
     /** Begin a fight with creatures native to the current location. */
     data class StartEncounter(override val actionId: ActionId, val creatures: List<CreatureTemplateId>) : GameCommand
 
+    /** Strike a living enemy. [targetId] null means the first living enemy. */
+    data class Attack(override val actionId: ActionId, val targetId: String? = null) : GameCommand
+
+    /** Raise guard: +defense until the next player action, and the enemies still get their turn. */
+    data class Defend(override val actionId: ActionId) : GameCommand
+
+    /** Cast a catalogue spell at [targetId] (an enemy id, or a creature template id for Identify). */
+    data class Cast(override val actionId: ActionId, val spell: SpellId, val targetId: String? = null) : GameCommand
+
+    /** Use one of a carried consumable. */
+    data class UseItem(override val actionId: ActionId, val item: ItemTemplateId) : GameCommand
+
+    /** Leave the fight; the enemies get one parting swing on the way out. */
+    data class Retreat(override val actionId: ActionId) : GameCommand
+
     /** Admit validated AI-proposed content into the persistent world. */
     data class CommitWorldProposal(override val actionId: ActionId, val proposal: WorldProposal) : GameCommand
 }

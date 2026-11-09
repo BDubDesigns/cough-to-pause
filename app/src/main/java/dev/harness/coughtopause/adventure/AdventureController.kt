@@ -24,6 +24,9 @@ import dev.harness.coughtopause.rpg.DifficultyTier
 import dev.harness.coughtopause.rpg.EventPayload
 import dev.harness.coughtopause.rpg.GameCommand
 import dev.harness.coughtopause.rpg.GameCommand.AttemptCheck
+import dev.harness.coughtopause.rpg.EncounterStatus
+import dev.harness.coughtopause.rpg.SpellCatalog
+import dev.harness.coughtopause.rpg.SpellKind
 import dev.harness.coughtopause.rpg.GameCommand.Travel
 import dev.harness.coughtopause.rpg.ProposedFact
 import dev.harness.coughtopause.rpg.WorldProposal
@@ -248,6 +251,48 @@ class AdventureController(private val context: Context) {
                 }
                 // "Andy, repeat" and "Play" re-speak the saved prompt; nothing is submitted here.
                 is AdventureIntent.Repeat -> replayOrResume()
+                is AdventureIntent.Attack -> {
+                    if (current.encounter?.status == EncounterStatus.ACTIVE) {
+                        submit(current, GameCommand.Attack(engine.newActionId()))
+                    } else {
+                        val here = current.world.locations.getValue(current.currentLocationId)
+                        if (here.creatures.isEmpty()) {
+                            transcript += "Nothing here wants a fight."
+                            publish()
+                        } else {
+                            // Opening move: start the fight, then the next "attack" swings.
+                            submit(
+                                current,
+                                GameCommand.StartEncounter(engine.newActionId(), here.creatures.take(2)),
+                            )
+                        }
+                    }
+                }
+                is AdventureIntent.Defend -> submit(current, GameCommand.Defend(engine.newActionId()))
+                is AdventureIntent.Cast -> {
+                    val spellId = intent.spell ?: SpellCatalog.EMBER_BOLT
+                    val spell = SpellCatalog.byId(spellId)
+                    if (spell == null) {
+                        transcript += "You do not know that spell."
+                        publish()
+                    } else if (current.encounter?.status != EncounterStatus.ACTIVE && spell.kind == SpellKind.DAMAGE) {
+                        transcript += "There is nothing to cast at."
+                        publish()
+                    } else {
+                        submit(current, GameCommand.Cast(engine.newActionId(), spell.id, null))
+                    }
+                }
+                is AdventureIntent.Use -> {
+                    val item = intent.item ?: current.player.inventory.keys
+                        .firstOrNull { engine.carriedHeals(it) }
+                    if (item == null) {
+                        transcript += "You are not carrying anything to use."
+                        publish()
+                    } else {
+                        submit(current, GameCommand.UseItem(engine.newActionId(), item))
+                    }
+                }
+                is AdventureIntent.Retreat -> submit(current, GameCommand.Retreat(engine.newActionId()))
                 is AdventureIntent.Talk -> {
                     val npc = current.world.npcs[intent.npc]
                     transcript += if (npc != null) {

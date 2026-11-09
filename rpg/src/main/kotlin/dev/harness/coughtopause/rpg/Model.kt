@@ -98,7 +98,13 @@ data class Encounter(
     val round: Int,
     val turn: TurnState,
     val status: EncounterStatus,
-)
+    /** Defense bonus from defending, cleared when the player acts again. */
+    val playerGuard: Int = 0,
+) {
+    val livingEnemies: List<CreatureInstance> get() = enemies.filter { it.hp > 0 }
+
+    val isCombatOver: Boolean get() = status != EncounterStatus.ACTIVE
+}
 
 /** Idempotency receipt: an action id is applied at most once, and its payload is pinned. */
 data class AppliedAction(
@@ -122,6 +128,8 @@ data class Campaign(
     val xpLedger: Map<LedgerKey, Int>,
     val appliedActions: Map<ActionId, AppliedAction>,
     val events: List<GameEvent>,
+    /** Creature templates the character has identified; reading them again is free. */
+    val identified: Set<CreatureTemplateId> = emptySet(),
 ) {
     /** Full roll history, oldest first, derived from the event log (single source of truth). */
     val rolls: List<RollRecord>
