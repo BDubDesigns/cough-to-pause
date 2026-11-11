@@ -31,6 +31,9 @@ that is a bad trade in an app that already ships TensorFlow Lite.
 - Licence: train our own model. The pretrained openWakeWord models are CC-BY-NC-SA, which we must
   not ship.
 
+The reproducible training/export toolchain (pinned environments, TFLite conversion, Android
+contract checks) lives in `scripts/wakeword/` - see its README.
+
 ## The experiment, in order
 
 1. **Train** a `hey andy` model from the openWakeWord notebook; export ONNX, convert to TFLite.

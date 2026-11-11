@@ -1,0 +1,42 @@
+# openWakeWord training config for "Hey Andy".  Keys are exactly what openwakeword/train.py
+# (commit 368c037) reads.  Paths are relative to the working directory run_pipeline.sh uses.
+model_name: "hey_andy"
+target_phrase:
+  - "hey andy"
+# Words the app's own narration says, so the model learns they are NOT the wake phrase.
+custom_negative_phrases:
+  - "andy"
+  - "handy"
+  - "candy"
+  - "sandy"
+  - "hey randy"
+  - "hey annie"
+  - "hey emily"
+  - "any day"
+n_samples: 10000          # TTS positives/negatives for training (upstream default)
+n_samples_val: 2000
+tts_batch_size: 50
+augmentation_batch_size: 16
+piper_sample_generator_path: "./piper-sample-generator"
+output_dir: "./out"
+rir_paths:
+  - "./data/mit_rirs"
+background_paths:
+  - "./data/audioset_16k"
+  - "./data/fma"
+background_paths_duplication_rate:
+  - 1
+  - 1
+false_positive_validation_data_path: "./data/validation_set_features.npy"
+augmentation_rounds: 1
+feature_data_files:
+  "ACAV100M_sample": "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+model_type: "dnn"
+layer_size: 32            # 32 -> ~205 KB tflite; 64 roughly 4x
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

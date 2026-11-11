@@ -1,0 +1,16 @@
+# ONNX -> TFLite conversion environment.  Python 3.11.  No torch, no openwakeword training deps.
+# Verified together on 2026-11 (see README.md for the verification log).
+tensorflow==2.19.0
+tf-keras==2.19.0
+onnx2tf==1.29.24
+onnx==1.19.1
+onnxruntime==1.23.0
+onnxsim==0.4.36
+ai-edge-litert==2.1.0
+protobuf==4.25.5
+numpy==1.26.4
+ml-dtypes==0.5.1
+# onnx2tf imports these at runtime
+onnx-graphsurgeon
+sng4onnx
+psutil

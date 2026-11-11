@@ -1,0 +1,39 @@
+# Training environment for the "Hey Andy" openWakeWord model.  Python 3.11.
+# Deliberately has NO TensorFlow: TFLite conversion lives in requirements-convert.txt, because the
+# two stacks need incompatible numpy/protobuf/onnx pins (see README.md).
+#
+# Install:  uv pip install -r requirements-train.txt     (or: pip install -r ...)
+#
+# torch 2.5.1 is pinned on purpose.  Newer torch (>=2.9) switches torch.onnx.export to the dynamo
+# exporter, which needs onnxscript and is not what upstream train.py was written against.
+torch==2.5.1
+torchaudio==2.5.1
+numpy==1.26.4
+# acoustics 0.2.6 imports scipy.special.sph_harm, removed in scipy 1.17.
+scipy==1.16.3
+torchmetrics==1.2.0
+torchinfo==1.8.0
+speechbrain==0.5.14
+audiomentations==0.33.0
+torch-audiomentations==0.11.0
+acoustics==0.2.6
+mutagen==1.47.0
+pronouncing==0.2.0
+deep-phonemizer==0.0.19
+setuptools<81   # pronouncing imports pkg_resources (gone in newer setuptools)
+pyyaml
+scikit-learn
+tqdm
+requests
+soundfile
+datasets==2.14.6
+# onnx is only needed so train.py's export (legacy exporter) can write/inspect the file.
+onnx==1.17.0
+onnxruntime==1.20.1
+ai-edge-litert==2.1.0
+speexdsp-ns==0.1.2
+# piper-sample-generator dependencies (TTS for positive/adversarial clips)
+piper-phonemize-cross==1.2.1 ; platform_machine == "x86_64"
+webrtcvad-wheels
+# openWakeWord at an exact commit (the PyPI 0.6.0 sdist lacks the --convert_to_tflite flag).
+openwakeword @ git+https://github.com/dscripka/openWakeWord@368c03716d1e92591906a84949bc477f3a834455
